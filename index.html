@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Virtual Closet</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="navbar">
+    <button onclick="showTab('home')">Home</button>
+    <button onclick="showTab('add')">Add to Closet</button>
+    <button onclick="showTab('view')">View Closet</button>
+    <button onclick="showTab('planner')">Planner</button>
+    <button onclick="showTab('shop')">Shop</button>
+    <button onclick="suggestOutfit()">What should I wear today?</button>
+    <button onclick="resetCloset()">Reset Closet</button>
+  </div>
+
+  <h2 id="suggestion">
+    Add at least one shirt and one pants/jeans/shorts to get a suggestion.
+  </h2>
+
+  <div id="tab-home" class="tab active">
+    <h1>Welcome</h1>
+    <p>Instructions:</p>
+    <ol>
+      <li>Go to <strong>Add to Closet</strong> and upload your items. Type &amp; color auto-detect.</li>
+      <li>Use <strong>View Closet</strong> to search &amp; edit entries.</li>
+      <li>Click <strong>What should I wear today?</strong> for a random outfit.</li>
+    </ol>
+  </div>
+
+  <div id="tab-add" class="tab">
+    <h2>Add to Closet</h2>
+    <div class="layout">
+      <div class="categories">
+        <ul>
+          <li>Type:</li>
+          <li>Color:</li>
+          <li>Event:</li>
+          <li>Pattern:</li>
+          <li>Tags:</li>
+        </ul>
+      </div>
+      <div>
+        <input type="file" id="upload" class="lavender"><br />
+        <!-- Optional manual override fields; AI will fill these on edit -->
+        <input type="text" id="type" placeholder="Clothing type (auto-detected)" class="lavender" />
+        <input type="text" id="color" placeholder="Color (auto-detected)" class="lavender" />
+        <input type="text" id="event" placeholder="Event (e.g. dinner)" class="lavender" />
+        <input type="text" id="pattern" placeholder="Pattern (e.g. stripes)" class="lavender" />
+        <input type="text" id="tags" placeholder="Tags (e.g. cute, comfy)" class="lavender" />
+
+        <button class="upload-btn" onclick="addItem()">➕ Add to Closet (AI)</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="tab-view" class="tab">
+    <h2>View Closet</h2>
+    <input type="text" id="search" placeholder="Search by tag, color, or type"
+           class="lavender" oninput="searchCloset()" />
+    <div id="closet"></div>
+  </div>
+
+  <div id="tab-planner" class="tab">
+    <h2>Planner (Coming Soon)</h2>
+  </div>
+
+  <div id="tab-shop" class="tab">
+    <h2>Shop (Coming Soon)</h2>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

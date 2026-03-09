@@ -1,0 +1,25 @@
+# macOS + editor
+.DS_Store
+.vscode/
+
+# Python env + caches
+venv/
+clothing-api/venv/
+Clothing_Detection_YOLO/yolov3env/
+__pycache__/
+*.pyc
+
+# Large binaries / weights
+*.pt
+*.onnx
+*.whl
+*.weights
+*.zip
+*.tar
+*.gz
+
+# Temp folders
+uploads/
+venv/
+__pycache__/
+.DS_Store
