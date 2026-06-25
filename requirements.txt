@@ -8,8 +8,13 @@ transformers>=4.40.0
 
 # Image processing
 pillow>=10.0.0
-opencv-python-headless>=4.8.0
+
+# Colour naming
+webcolors==24.6.0
+
+# AI vision + text (outfit suggestions, match check, clothing detection)
+anthropic>=0.40.0
+openai>=1.35.0
 
 # Utilities
 numpy>=1.26.0
-scikit-learn>=1.5.0

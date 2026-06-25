@@ -1,21 +1,26 @@
 {
-    "name": "My Virtual Closet",
-    "short_name": "Closet",
-    "start_url": "index.html",
-    "display": "standalone",
-    "background_color": "#ffffff",
-    "theme_color": "#000000",
-    "icons": [
-      {
-        "src": "icon-192.png",
-        "sizes": "192x192",
-        "type": "image/png"
-      },
-      {
-        "src": "icon-512.png",
-        "sizes": "512x512",
-        "type": "image/png"
-      }
-    ]
-  }
-  
+  "name": "Virtual Closet",
+  "short_name": "Closet",
+  "description": "Your AI-powered personal wardrobe assistant",
+  "start_url": "/frontend/index.html",
+  "display": "standalone",
+  "background_color": "#faf5ff",
+  "theme_color": "#c084fc",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='40' fill='%23a855f7'/><text x='50%25' y='55%25' dominant-baseline='middle' text-anchor='middle' font-size='110'>👗</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='100' fill='%23a855f7'/><text x='50%25' y='55%25' dominant-baseline='middle' text-anchor='middle' font-size='300'>👗</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["lifestyle", "utilities"],
+  "screenshots": []
+}

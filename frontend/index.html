@@ -3,74 +3,423 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>My Virtual Closet</title>
+  <meta name="theme-color" content="#c084fc" />
+  <meta name="description" content="Your personal AI-powered virtual closet" />
+  <title>Virtual Closet</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="navbar">
-    <button onclick="showTab('home')">Home</button>
-    <button onclick="showTab('add')">Add to Closet</button>
-    <button onclick="showTab('view')">View Closet</button>
-    <button onclick="showTab('planner')">Planner</button>
-    <button onclick="showTab('shop')">Shop</button>
-    <button onclick="suggestOutfit()">What should I wear today?</button>
-    <button onclick="resetCloset()">Reset Closet</button>
-  </div>
 
-  <h2 id="suggestion">
-    Add at least one shirt and one pants/jeans/shorts to get a suggestion.
-  </h2>
-
-  <div id="tab-home" class="tab active">
-    <h1>Welcome</h1>
-    <p>Instructions:</p>
-    <ol>
-      <li>Go to <strong>Add to Closet</strong> and upload your items. Type &amp; color auto-detect.</li>
-      <li>Use <strong>View Closet</strong> to search &amp; edit entries.</li>
-      <li>Click <strong>What should I wear today?</strong> for a random outfit.</li>
-    </ol>
-  </div>
-
-  <div id="tab-add" class="tab">
-    <h2>Add to Closet</h2>
-    <div class="layout">
-      <div class="categories">
-        <ul>
-          <li>Type:</li>
-          <li>Color:</li>
-          <li>Event:</li>
-          <li>Pattern:</li>
-          <li>Tags:</li>
-        </ul>
+  <!-- ===== SIDEBAR NAV ===== -->
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">
+        <span class="logo-icon">👗</span>
+        <span class="logo-text">Virtual Closet</span>
       </div>
-      <div>
-        <input type="file" id="upload" class="lavender"><br />
-        <!-- Optional manual override fields; AI will fill these on edit -->
-        <input type="text" id="type" placeholder="Clothing type (auto-detected)" class="lavender" />
-        <input type="text" id="color" placeholder="Color (auto-detected)" class="lavender" />
-        <input type="text" id="event" placeholder="Event (e.g. dinner)" class="lavender" />
-        <input type="text" id="pattern" placeholder="Pattern (e.g. stripes)" class="lavender" />
-        <input type="text" id="tags" placeholder="Tags (e.g. cute, comfy)" class="lavender" />
+      <button class="sidebar-close" id="sidebarClose" aria-label="Close menu">✕</button>
+    </div>
 
-        <button class="upload-btn" onclick="addItem()">➕ Add to Closet (AI)</button>
+    <ul class="nav-links">
+      <li><button class="nav-btn active" data-tab="home">
+        <span class="nav-icon">🏠</span> Home
+      </button></li>
+      <li><button class="nav-btn" data-tab="add">
+        <span class="nav-icon">➕</span> Add Item
+      </button></li>
+      <li><button class="nav-btn" data-tab="closet">
+        <span class="nav-icon">👚</span> My Closet
+        <span class="badge" id="closet-count">0</span>
+      </button></li>
+      <li><button class="nav-btn" data-tab="outfits">
+        <span class="nav-icon">✨</span> Outfit Ideas
+      </button></li>
+      <li><button class="nav-btn" data-tab="match">
+        <span class="nav-icon">🔀</span> Match Check
+      </button></li>
+      <li><button class="nav-btn" data-tab="planner">
+        <span class="nav-icon">📅</span> Planner
+      </button></li>
+    </ul>
+
+    <div class="sidebar-footer">
+      <button class="danger-btn" onclick="resetCloset()">🗑 Reset Closet</button>
+    </div>
+  </nav>
+
+  <!-- ===== MOBILE TOP BAR ===== -->
+  <header class="topbar">
+    <button class="hamburger" id="hamburger" aria-label="Open menu">☰</button>
+    <span class="topbar-title">Virtual Closet</span>
+    <button class="topbar-outfit-btn" onclick="showTab('outfits')">✨ Suggest</button>
+  </header>
+
+  <!-- ===== MAIN CONTENT ===== -->
+  <main class="main-content" id="mainContent">
+
+    <!-- HOME TAB -->
+    <section id="tab-home" class="tab active">
+      <div class="hero">
+        <div class="hero-text">
+          <h1>Your AI-Powered<br/><span class="gradient-text">Virtual Closet</span></h1>
+          <p>Upload your clothes, get AI detection for type &amp; color, then let the app suggest outfits for you.</p>
+          <div class="hero-actions">
+            <button class="btn-primary" onclick="showTab('add')">➕ Add Your First Item</button>
+            <button class="btn-secondary" onclick="showTab('closet')">View My Closet</button>
+          </div>
+        </div>
+        <div class="hero-visual">
+          <div class="hero-cards">
+            <div class="mini-card" style="--r:0deg">👗</div>
+            <div class="mini-card" style="--r:12deg">👔</div>
+            <div class="mini-card" style="--r:-8deg">👖</div>
+            <div class="mini-card" style="--r:20deg">🧥</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="feature-grid">
+        <div class="feature-card">
+          <span class="feature-icon">🤖</span>
+          <h3>AI Detection</h3>
+          <p>YOLOS-Fashionpedia model auto-detects clothing type and dominant color from any photo.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">🔍</span>
+          <h3>Smart Search</h3>
+          <p>Filter your closet by type, color, tag, or occasion in an instant.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">✨</span>
+          <h3>Outfit Ideas</h3>
+          <p>Get a randomized outfit suggestion or browse curated combos from your wardrobe.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">📅</span>
+          <h3>Planner</h3>
+          <p>Plan your outfits for the week and never stress about getting dressed again.</p>
+        </div>
+      </div>
+
+      <div class="stats-bar" id="statsBar">
+        <div class="stat">
+          <span class="stat-num" id="statTotal">0</span>
+          <span class="stat-label">Items</span>
+        </div>
+        <div class="stat">
+          <span class="stat-num" id="statTops">0</span>
+          <span class="stat-label">Tops</span>
+        </div>
+        <div class="stat">
+          <span class="stat-num" id="statBottoms">0</span>
+          <span class="stat-label">Bottoms</span>
+        </div>
+        <div class="stat">
+          <span class="stat-num" id="statOther">0</span>
+          <span class="stat-label">Other</span>
+        </div>
+      </div>
+
+      <!-- Style DNA — visible after 5+ items -->
+      <div class="style-dna" id="styleDna" style="display:none">
+        <div class="dna-header">
+          <div>
+            <h3>Your Style DNA</h3>
+            <p>Based on your wardrobe</p>
+          </div>
+          <span class="dna-personality" id="dnaPersonality"></span>
+        </div>
+        <div class="dna-body">
+          <div class="dna-section">
+            <div class="dna-section-label">Dominant Colors</div>
+            <div class="dna-swatches" id="dnaSwatches"></div>
+          </div>
+          <div class="dna-section">
+            <div class="dna-section-label">Wardrobe Breakdown</div>
+            <div class="dna-bar-wrap" id="dnaBreakdown"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ADD ITEM TAB -->
+    <section id="tab-add" class="tab">
+      <div class="page-header">
+        <h2>Add to Closet</h2>
+        <p>Upload a photo and let AI fill in the details.</p>
+      </div>
+
+      <div class="add-layout">
+        <!-- Upload Zone -->
+        <div class="upload-zone" id="uploadZone">
+          <div class="upload-inner" id="uploadInner">
+            <input type="file" id="upload" accept="image/*" multiple hidden />
+            <div class="upload-placeholder" id="uploadPlaceholder">
+              <span class="upload-icon">📷</span>
+              <p>Drop images here or <button class="link-btn" onclick="document.getElementById('upload').click()">browse</button></p>
+              <p class="upload-hint">JPG, PNG, WEBP · multiple files OK · max 10 MB each</p>
+            </div>
+            <div class="upload-preview" id="uploadPreview" style="display:none">
+              <img id="previewImg" src="" alt="Preview" />
+              <button class="remove-preview" onclick="clearUpload()">✕</button>
+            </div>
+            <!-- Multi-file queue -->
+            <div class="upload-queue" id="uploadQueue" style="display:none"></div>
+          </div>
+
+          <!-- AI Status -->
+          <div class="ai-status" id="aiStatus" style="display:none">
+            <div class="ai-spinner"></div>
+            <span id="aiStatusText">Analyzing with AI...</span>
+          </div>
+        </div>
+
+        <!-- Form -->
+        <form class="item-form" id="itemForm" onsubmit="return false">
+          <div class="form-row">
+            <label for="type">Type <span class="auto-badge">AI</span></label>
+            <input type="text" id="type" placeholder="e.g. t-shirt" autocomplete="off" />
+          </div>
+          <div class="form-row">
+            <label for="color">Color <span class="auto-badge">AI</span></label>
+            <div class="color-row">
+              <input type="text" id="color" placeholder="e.g. navy blue" autocomplete="off" />
+              <span class="color-preview-dot" id="colorDot" style="background:#ccc"></span>
+            </div>
+          </div>
+          <div class="form-row">
+            <label for="event">Occasion</label>
+            <select id="event">
+              <option value="">-- Select --</option>
+              <option>Casual</option>
+              <option>Work</option>
+              <option>Date night</option>
+              <option>Formal</option>
+              <option>Beach</option>
+              <option>Gym</option>
+              <option>Travel</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label for="pattern">Pattern</label>
+            <select id="pattern">
+              <option value="">-- Select --</option>
+              <option>Solid</option>
+              <option>Striped</option>
+              <option>Plaid</option>
+              <option>Polka dot</option>
+              <option>Floral</option>
+              <option>Graphic</option>
+              <option>Animal print</option>
+              <option>Abstract</option>
+              <option>Tie-dye</option>
+              <option>Camouflage</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label for="tags">Tags</label>
+            <input type="text" id="tags" placeholder="e.g. summer, favourite, comfy" autocomplete="off" />
+          </div>
+
+          <div class="form-actions">
+            <button type="button" class="btn-primary" id="addBtn" onclick="addItem()">
+              <span id="addBtnText">➕ Add to Closet</span>
+            </button>
+            <button type="button" class="btn-ghost" id="cancelEditBtn" onclick="cancelEdit()" style="display:none">Cancel Edit</button>
+          </div>
+          <div class="batch-progress" id="batchProgress" style="display:none">
+            <div class="batch-progress-bar"><div class="batch-progress-fill" id="batchProgressFill"></div></div>
+            <span class="batch-progress-label" id="batchProgressLabel"></span>
+          </div>
+        </form>
+      </div>
+
+      <div class="toast" id="toast"></div>
+    </section>
+
+    <!-- MY CLOSET TAB -->
+    <section id="tab-closet" class="tab">
+      <div class="page-header">
+        <h2>My Closet</h2>
+        <p id="closetSubtitle">Loading your wardrobe...</p>
+      </div>
+
+      <!-- Search + Filter Bar -->
+      <div class="filter-bar">
+        <div class="search-wrap">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="search" placeholder="Search by type, color, tags..." oninput="filterCloset()" />
+          <button class="clear-search" id="clearSearch" onclick="clearSearch()" style="display:none">✕</button>
+        </div>
+        <div class="filter-chips" id="filterChips">
+          <button class="chip active" data-filter="all" onclick="setFilter('all', this)">All</button>
+          <button class="chip" data-filter="tops" onclick="setFilter('tops', this)">Tops</button>
+          <button class="chip" data-filter="bottoms" onclick="setFilter('bottoms', this)">Bottoms</button>
+          <button class="chip" data-filter="jackets" onclick="setFilter('jackets', this)">Jackets</button>
+          <button class="chip" data-filter="dresses" onclick="setFilter('dresses', this)">Dresses</button>
+          <button class="chip" data-filter="other" onclick="setFilter('other', this)">Other</button>
+        </div>
+        <div class="view-toggle">
+          <button class="view-btn active" id="gridViewBtn" onclick="setView('grid')" title="Grid view">⊞</button>
+          <button class="view-btn" id="listViewBtn" onclick="setView('list')" title="List view">☰</button>
+        </div>
+      </div>
+
+      <!-- Closet Grid -->
+      <div id="closet" class="closet-grid"></div>
+      <div id="emptyState" class="empty-state" style="display:none">
+        <span class="empty-icon">👗</span>
+        <p>Your closet is empty.</p>
+        <button class="btn-primary" onclick="showTab('add')">Add your first item</button>
+      </div>
+    </section>
+
+    <!-- OUTFIT IDEAS TAB -->
+    <section id="tab-outfits" class="tab">
+      <div class="page-header">
+        <h2>Outfit Ideas</h2>
+        <p>Let AI mix and match from your wardrobe.</p>
+      </div>
+
+      <!-- Live weather + time bar -->
+      <div id="weatherBar" class="weather-bar" style="display:none">
+        <span id="weatherText"></span>
+        <button class="weather-refresh" onclick="fetchWeather(true)" title="Refresh weather">↻</button>
+      </div>
+
+      <div class="outfit-controls">
+        <div class="form-row narrow">
+          <label for="outfitOccasion">Occasion</label>
+          <select id="outfitOccasion">
+            <option value="">Any occasion</option>
+            <option>Casual</option>
+            <option>Work</option>
+            <option>Date night</option>
+            <option>Formal</option>
+            <option>Beach</option>
+            <option>Gym</option>
+            <option>Travel</option>
+          </select>
+        </div>
+        <button class="btn-primary" onclick="suggestOutfit()">🎲 Shuffle</button>
+        <button class="btn-ai" id="askAiBtn" onclick="askAiOutfit()">
+          <span class="btn-ai-icon">🤖</span> Ask AI
+        </button>
+      </div>
+
+      <!-- AI thinking state -->
+      <div class="ai-thinking" id="aiThinking" style="display:none">
+        <div class="ai-spinner"></div>
+        <span>AI is styling your outfit…</span>
+      </div>
+
+      <div id="outfitResult" class="outfit-result">
+        <div class="outfit-placeholder">
+          <span>✨</span>
+          <p>Hit Shuffle for a random combo, or Ask AI for a smart suggestion.</p>
+        </div>
+      </div>
+
+      <div id="outfitHistory" class="outfit-history"></div>
+    </section>
+
+    <!-- MATCH CHECK TAB -->
+    <section id="tab-match" class="tab">
+      <div class="page-header">
+        <h2>Match Check</h2>
+        <p>Pick two items and AI will tell you if they work together.</p>
+      </div>
+
+      <div class="match-layout">
+        <!-- Picker A -->
+        <div class="match-picker" id="matchPickerA" onclick="openMatchPicker('A')">
+          <div class="match-picker-empty" id="matchEmptyA">
+            <span>👕</span>
+            <p>Pick first item</p>
+          </div>
+          <div class="match-picker-filled" id="matchFilledA" style="display:none">
+            <img id="matchImgA" src="" alt="" />
+            <div class="match-item-label" id="matchLabelA"></div>
+            <button class="match-clear-btn" onclick="clearMatchItem('A');event.stopPropagation()">✕</button>
+          </div>
+        </div>
+
+        <!-- VS badge -->
+        <div class="match-vs">
+          <span>VS</span>
+        </div>
+
+        <!-- Picker B -->
+        <div class="match-picker" id="matchPickerB" onclick="openMatchPicker('B')">
+          <div class="match-picker-empty" id="matchEmptyB">
+            <span>👖</span>
+            <p>Pick second item</p>
+          </div>
+          <div class="match-picker-filled" id="matchFilledB" style="display:none">
+            <img id="matchImgB" src="" alt="" />
+            <div class="match-item-label" id="matchLabelB"></div>
+            <button class="match-clear-btn" onclick="clearMatchItem('B');event.stopPropagation()">✕</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="match-action">
+        <button class="btn-ai" id="checkMatchBtn" onclick="checkMatch()" disabled>
+          <span class="btn-ai-icon">🤖</span> Check Match
+        </button>
+      </div>
+
+      <!-- Match thinking -->
+      <div class="ai-thinking" id="matchThinking" style="display:none">
+        <div class="ai-spinner"></div>
+        <span>Checking compatibility…</span>
+      </div>
+
+      <!-- Match result -->
+      <div id="matchResult" style="display:none">
+        <div class="match-result-card" id="matchResultCard">
+          <div class="match-rating" id="matchRating"></div>
+          <p class="match-explanation" id="matchExplanation"></p>
+          <div class="match-tips" id="matchTips"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PLANNER TAB -->
+    <section id="tab-planner" class="tab">
+      <div class="page-header">
+        <h2>Weekly Planner</h2>
+        <p>Plan your outfits for the week ahead.</p>
+      </div>
+
+      <div class="planner-grid" id="plannerGrid"></div>
+    </section>
+
+  </main>
+
+  <!-- ===== ITEM DETAIL MODAL ===== -->
+  <div class="modal-overlay" id="itemModal" onclick="closeModal(event)">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <button class="modal-close" onclick="closeItemModal()">✕</button>
+      <img id="modalImg" src="" alt="" />
+      <div class="modal-info">
+        <div class="modal-color-dot" id="modalColorDot"></div>
+        <h2 id="modalTitle"></h2>
+        <p id="modalColor"></p>
+        <div class="modal-tags" id="modalTags"></div>
+        <div class="modal-actions">
+          <button class="btn-primary" id="modalEditBtn">✏️ Edit</button>
+          <button class="danger-btn" id="modalDeleteBtn">🗑 Delete</button>
+        </div>
       </div>
     </div>
   </div>
 
-  <div id="tab-view" class="tab">
-    <h2>View Closet</h2>
-    <input type="text" id="search" placeholder="Search by tag, color, or type"
-           class="lavender" oninput="searchCloset()" />
-    <div id="closet"></div>
-  </div>
-
-  <div id="tab-planner" class="tab">
-    <h2>Planner (Coming Soon)</h2>
-  </div>
-
-  <div id="tab-shop" class="tab">
-    <h2>Shop (Coming Soon)</h2>
-  </div>
+  <div class="overlay-bg" id="overlayBg" onclick="closeSidebar()"></div>
 
   <script src="script.js"></script>
 </body>

@@ -1,424 +1,786 @@
-import os
+"""
+Virtual Closet — FastAPI backend  v4.0
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Detection pipeline (priority order):
+  1. Claude Haiku vision  — most accurate (set ANTHROPIC_API_KEY)
+  2. GPT-4o-mini vision   — accurate alternative (set OPENAI_API_KEY)
+  3. YOLOS-Fashionpedia   — local fallback, no API key needed
+  4. Canvas heuristic     — last resort
+
+AI outfit/match features work with either Anthropic or OpenAI key.
+"""
+
+import asyncio
+import base64
 import io
-from typing import List, Optional
+import json
+import os
+import re
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import torch
 import webcolors
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from transformers import YolosForObjectDetection, YolosImageProcessor
+from fastapi.staticfiles import StaticFiles
 from PIL import Image
+from pydantic import BaseModel
+from transformers import YolosForObjectDetection, YolosImageProcessor
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-# ----------------- INIT APP -----------------
-app = FastAPI()
 
-# 🚨 For dev, allow any origin (so it works from file:// or http://localhost)
+# ── Anthropic (primary vision) ─────────────────────────────────
+try:
+    import anthropic as _anthropic_module
+    _ANT_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+    if _ANT_KEY:
+        _ant = _anthropic_module.AsyncAnthropic(api_key=_ANT_KEY)
+        ANTHROPIC_AVAILABLE = True
+    else:
+        _ant = None
+        ANTHROPIC_AVAILABLE = False
+except (ImportError, Exception):
+    _ant = None
+    ANTHROPIC_AVAILABLE = False
+
+# ── OpenAI (secondary vision) ──────────────────────────────────
+try:
+    from openai import AsyncOpenAI
+    _OPENAI_KEY = os.environ.get("OPENAI_API_KEY", "")
+    if _OPENAI_KEY:
+        _oai = AsyncOpenAI(api_key=_OPENAI_KEY)
+        OPENAI_AVAILABLE = True
+    else:
+        _oai = None
+        OPENAI_AVAILABLE = False
+except (ImportError, Exception):
+    _oai = None
+    OPENAI_AVAILABLE = False
+
+AI_AVAILABLE = ANTHROPIC_AVAILABLE or OPENAI_AVAILABLE
+
+
+# ── App ────────────────────────────────────────────────────────
+app = FastAPI(title="Virtual Closet API", version="4.0.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # you can restrict later
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ----------------- LOAD MODEL -----------------
-model_name = "valentinafeve/yolos-fashionpedia"
-model = YolosForObjectDetection.from_pretrained(model_name, use_safetensors=True)
-processor = YolosImageProcessor.from_pretrained(model_name)
+_FRONTEND = Path(__file__).parent.parent / "frontend"
+if _FRONTEND.exists():
+    app.mount("/app", StaticFiles(directory=str(_FRONTEND), html=True), name="frontend")
 
-# ----------------- COLOR UTILS -----------------
-def closest_css_color(rgb):
-    """Return nearest CSS3 color name for an RGB triplet."""
+
+# ── YOLOS (local fallback, loaded lazily) ─────────────────────
+_yolos_model     = None
+_yolos_processor = None
+YOLOS_MODEL_NAME = "valentinafeve/yolos-fashionpedia"
+
+def _get_yolos():
+    global _yolos_model, _yolos_processor
+    if _yolos_model is None:
+        print(f"[yolos] Loading {YOLOS_MODEL_NAME} …")
+        _yolos_model     = YolosForObjectDetection.from_pretrained(YOLOS_MODEL_NAME, use_safetensors=True)
+        _yolos_processor = YolosImageProcessor.from_pretrained(YOLOS_MODEL_NAME)
+        _yolos_model.eval()
+        print("[yolos] Ready.")
+    return _yolos_model, _yolos_processor
+
+
+# ══════════════════════════════════════════════════════════════
+#  COLOUR UTILITIES
+# ══════════════════════════════════════════════════════════════
+
+def rgb_to_hex(rgb) -> str:
+    return "#%02x%02x%02x" % tuple(int(v) for v in rgb[:3])
+
+
+def closest_css_color(rgb: tuple) -> str:
     try:
         return webcolors.rgb_to_name(rgb, spec="css3")
     except ValueError:
-        min_dist, closest = float("inf"), None
+        min_dist, closest = float("inf"), "gray"
         for hex_code, name in webcolors.CSS3_HEX_TO_NAMES.items():
             r, g, b = webcolors.hex_to_rgb(hex_code)
-            dist = (r - rgb[0])**2 + (g - rgb[1])**2 + (b - rgb[2])**2
+            dist = (r - rgb[0]) ** 2 + (g - rgb[1]) ** 2 + (b - rgb[2]) ** 2
             if dist < min_dist:
                 min_dist, closest = dist, name
-        return closest or "gray"
+        return closest
 
 
-def rgb_to_hex(rgb):
-    return "#%02x%02x%02x" % rgb
-
-
-def sleeve_likely_by_edges(pil_image: Image.Image, filename: str = None) -> bool:
-    """
-    Compare left/right vertical bands (excluding background) to a center torso patch.
-    Scans inward from edges until it finds bands whose pixels mostly match torso color.
-    """
-    import numpy as np
-
-    w, h = pil_image.size
-    small = pil_image.resize((min(360, w), min(360, h)))
-    arr = np.array(small).astype(np.float32)  # H x W x 3
-    H, W, _ = arr.shape
-
-    # torso reference (center box)
-    cx0, cx1 = int(W * 0.35), int(W * 0.65)
-    cy0, cy1 = int(H * 0.30), int(H * 0.55)
-    torso = arr[cy0:cy1, cx0:cx1]
-    torso_mean = torso.reshape(-1, 3).mean(0)
-
-    # background from corners
-    corners = np.vstack([
-        arr[0:int(H * 0.08), 0:int(W * 0.08)].reshape(-1, 3),
-        arr[0:int(H * 0.08), W-int(W * 0.08):W].reshape(-1, 3),
-        arr[H-int(H * 0.08):H, 0:int(W * 0.08)].reshape(-1, 3),
-        arr[H-int(H * 0.08):H, W-int(W * 0.08):W].reshape(-1, 3),
-    ])
-    bg_mean = corners.mean(0)
-    bg_dist = np.linalg.norm(arr - bg_mean, axis=2)
-    bg_mask = bg_dist < 28.0
-
-    # vertical band region
-    y0, y1 = int(H * 0.50), int(H * 0.88)
-
-    def band_matches(x0, x1):
-        band = arr[y0:y1, x0:x1]
-        band_bg = bg_mask[y0:y1, x0:x1]
-        if band.size == 0:
-            return 0.0, 999.0
-        pix = band[~band_bg]
-        if pix.size == 0:
-            return 0.0, 999.0
-        d = np.linalg.norm(pix - torso_mean, axis=1)
-        frac = float((d < 32.0).mean())
-        return frac, float(d.mean()) if d.size else 999.0
-
-    band_w = max(2, int(W * 0.08))
-    step = max(2, int(W * 0.02))
-    left_best, right_best = 0.0, 0.0
-    left_debug, right_debug = (0.0, 999.0), (0.0, 999.0)
-
-    # scan from left
-    for x in range(int(W * 0.02), int(W * 0.30), step):
-        frac, md = band_matches(x, min(x + band_w, W))
-        if frac > left_best:
-            left_best = frac
-            left_debug = (frac, md)
-
-    # scan from right
-    for x in range(W - int(W * 0.02) - band_w, W - int(W * 0.30), -step):
-        frac, md = band_matches(max(0, x), min(x + band_w, W))
-        if frac > right_best:
-            right_best = frac
-            right_debug = (frac, md)
-
-    print(
-        f"[Sleeve Debug] {filename or ''} "
-        f"left_frac={left_best:.2f} right_frac={right_best:.2f} "
-        f"left_md={left_debug[1]:.1f} right_md={right_debug[1]:.1f}"
-    )
-
-    return (left_best >= 0.35) and (right_best >= 0.35)
-
-
-def hsvish_bucket_name(r: int, g: int, b: int) -> str:
-    V = max(r, g, b)
+def hsvish_bucket(r: int, g: int, b: int) -> str:
+    V      = max(r, g, b)
     chroma = V - min(r, g, b)
-    S = 0 if V == 0 else chroma / V
+    S      = 0 if V == 0 else chroma / V
 
-    if V >= 240:
-        return "white"
-    if V < 80 or (V < 120 and S < 0.12):
-        return "blue" if (b > r + 8 and b > g + 8) else "black"
-    if S < 0.12:
-        return "gray"
+    if V >= 230 and S < 0.12:  return "white"
+
+    # Dark teal: G and B both above R, and they're CLOSE to each other (abs < 25).
+    # Navy has B >> G (abs ~40-50), so tightening this prevents navy → teal.
+    if V < 120 and g > r + 12 and b > r + 12 and abs(g - b) < 25:
+        return "teal"
+
+    if V < 50:                 return "black"
+    if V < 110 and S < 0.15:  return "black"
+    if S < 0.12:               return "gray"
+
+    # Bright teal: G and B both clearly dominate R, close to each other
+    if g > r + 20 and b > r + 20 and abs(g - b) < 30:  return "teal"
+
     if r >= g and r >= b:
+        # Tan/khaki/beige: R dominant, G clearly above B, saturation under 0.55.
+        # Runs before pink/red — true red has S > 0.60 and G ≈ B; tan does not.
+        if g > b + 15 and S < 0.55 and V > 85:  return "tan"
+        if S < 0.32:                              return "pink"
+        if b > 90 and S < 0.50:                  return "pink"
         return "red"
+
     if g >= r and g >= b:
         return "green"
-    return "blue"
+
+    if b >= r and b >= g:
+        if V < 80:  return "navy"
+        # Purple: R close to G (lavender/violet) — G > R by 20+ means it's just blue
+        if r > 140 and S > 0.25 and (g - r) < 20:  return "purple"
+        return "blue"
+
+    return "gray"
 
 
-def np_kmeans(pixels: np.ndarray, k: int = 3, iters: int = 7, seed: int = 42):
-    """
-    Simple NumPy k-means for (N,3) pixels.
-    Returns (centers[k,3], labels[N]).
-    """
-    if pixels.ndim != 2 or pixels.shape[1] != 3:
-        raise ValueError("pixels must be (N,3)")
-
-    rng = np.random.default_rng(seed)
-    idx = rng.choice(pixels.shape[0], size=min(k, pixels.shape[0]), replace=False)
+def np_kmeans(pixels: np.ndarray, k: int = 5, iters: int = 12, seed: int = 42):
+    rng     = np.random.default_rng(seed)
+    idx     = rng.choice(pixels.shape[0], size=min(k, pixels.shape[0]), replace=False)
     centers = pixels[idx].astype(np.float32)
-
     for _ in range(iters):
-        d2 = ((pixels[:, None, :].astype(np.float32) - centers[None, :, :]) ** 2).sum(axis=2)
-        labels = d2.argmin(axis=1)
-
-        new_centers = np.empty_like(centers)
-        for c in range(centers.shape[0]):
-            mask = labels == c
-            if mask.any():
-                new_centers[c] = pixels[mask].mean(axis=0)
-            else:
-                new_centers[c] = pixels[rng.integers(0, pixels.shape[0])]
-        if np.allclose(new_centers, centers, atol=1e-1):
-            centers = new_centers
-            break
-        centers = new_centers
+        d2     = ((pixels[:, None].astype(np.float32) - centers[None]) ** 2).sum(2)
+        labels = d2.argmin(1)
+        new_c  = np.array([
+            pixels[labels == c].mean(0) if (labels == c).any()
+            else pixels[rng.integers(0, pixels.shape[0])]
+            for c in range(k)
+        ], dtype=np.float32)
+        if np.allclose(new_c, centers, atol=0.5):
+            centers = new_c; break
+        centers = new_c
     return centers, labels
 
 
-def get_dominant_color(pil_image: Image.Image) -> str:
-    image = pil_image.resize((64, 64))
-    pixels = np.asarray(image, dtype=np.uint16).reshape(-1, 3)
-
-    sums = pixels.sum(axis=1)
-    mask = (sums > 50) & (sums < 700)
-    pixels_f = pixels[mask] if mask.any() else pixels
-
-    centers, labels = np_kmeans(pixels_f, k=3, iters=7)
-    vals, counts = np.unique(labels, return_counts=True)
-    dominant = centers[vals[counts.argmax()]]
-    r, g, b = map(int, dominant)
-
-    bucket = hsvish_bucket_name(r, g, b)
-    return bucket if bucket in {"black", "gray", "white", "blue", "red", "green"} \
-                  else closest_css_color((r, g, b))
+def _is_skin_tone(r: float, g: float, b: float) -> bool:
+    """Detect skin-tone pixels so they don't pollute garment color detection."""
+    return (r > 90 and g > 50 and b > 20 and
+            r > g > b and
+            (r - b) > 30 and
+            (r - g) < 90 and
+            r < 240)
 
 
-def get_avg_rgb_from_bbox(pil_image, bbox, img_w, img_h):
-    cx, cy, bw, bh = bbox
-    x_min = int((cx - bw / 2) * img_w)
-    y_min = int((cy - bh / 2) * img_h)
-    x_max = int((cx + bw / 2) * img_w)
-    y_max = int((cy + bh / 2) * img_h)
-    x_min, y_min = max(0, x_min), max(0, y_min)
-    x_max, y_max = min(img_w, x_max), min(img_h, y_max)
-    if x_max <= x_min or y_max <= y_min:
-        return [128, 128, 128]
-    cropped = pil_image.crop((x_min, y_min, x_max, y_max))
-    return np.array(cropped).mean(axis=(0, 1)).astype(int).tolist()
+def dominant_color_from_image(pil_image: Image.Image) -> tuple:
+    """Returns (color_name, hex_str) for the dominant non-background garment colour."""
+    arr = np.asarray(pil_image.resize((100, 100)), dtype=np.float32).reshape(-1, 3)
+    r_ch, g_ch, b_ch = arr[:, 0], arr[:, 1], arr[:, 2]
+    sums   = arr.sum(1)
+    vmax   = np.maximum(np.maximum(r_ch, g_ch), b_ch)
+    vmin   = np.minimum(np.minimum(r_ch, g_ch), b_ch)
+    chroma = vmax - vmin
+
+    # Skin tones: R > G > B, strong R-B gap (>55), G not too far below R.
+    # Threshold R-B > 55 to avoid catching tan/khaki clothing pixels (which have smaller gap).
+    skin_mask = (
+        (r_ch > 100) & (g_ch > 60) & (b_ch > 30) &
+        (r_ch > g_ch) & (g_ch > b_ch) &
+        ((r_ch - b_ch) > 55) &
+        ((r_ch - g_ch) < 65) &
+        (r_ch < 240)
+    )
+    bg_mask   = (sums > 660) | (sums < 45) | ((chroma < 20) & (sums > 320))
+    keep      = ~skin_mask & ~bg_mask
+    px        = arr[keep].astype(np.uint16)
+    if len(px) < 50:
+        # Fallback: just drop white/near-white
+        px = arr[(sums > 80) & (sums < 700)].astype(np.uint16)
+    if len(px) < 10:
+        px = arr.astype(np.uint16)
+
+    centers, labels = np_kmeans(px, k=5)
+    vals, counts    = np.unique(labels, return_counts=True)
+
+    # Pick most common cluster that isn't white or a product-photo gray
+    sorted_idx = vals[np.argsort(-counts)]
+    best = None
+    for ci in sorted_idx:
+        cr, cg, cb = map(int, centers[ci])
+        cs = cr + cg + cb
+        cc = max(cr, cg, cb) - min(cr, cg, cb)
+        if cs < 650 and not (cc < 20 and cs > 320):  # skip white and mid-gray bg
+            best = (cr, cg, cb)
+            break
+    if best is None:
+        best = tuple(map(int, centers[sorted_idx[0]]))
+    r, g, b = best
+
+    name = hsvish_bucket(r, g, b)
+    if name not in {"black", "gray", "white", "blue", "navy", "red", "green",
+                    "pink", "teal", "purple", "tan", "cream"}:
+        name = closest_css_color((r, g, b))
+    return name, rgb_to_hex((r, g, b))
 
 
-def get_color_from_bbox(pil_image, bbox, img_w, img_h):
-    cx, cy, bw, bh = bbox
-    x_min = int((cx - bw / 2) * img_w)
-    y_min = int((cy - bh / 2) * img_h)
-    x_max = int((cx + bw / 2) * img_w)
-    y_max = int((cy + bh / 2) * img_h)
-    x_min, y_min = max(0, x_min), max(0, y_min)
-    x_max, y_max = min(img_w, x_max), min(img_h, y_max)
-    if x_max <= x_min or y_max <= y_min:
-        return "gray"
+def detect_pattern(pil_image: Image.Image) -> str:
+    """Detect solid / striped / polka dot using row+column variance analysis."""
+    small = np.array(pil_image.resize((80, 80)), dtype=np.float32)
 
-    cropped = pil_image.crop((x_min, y_min, x_max, y_max)).resize((64, 64))
-    pixels = np.asarray(cropped, dtype=np.uint16).reshape(-1, 3)
+    bg = small[:8, :8].mean(axis=(0, 1))
+    flat = small.reshape(-1, 3)
+    bg_dist = np.linalg.norm(flat - bg, axis=1)
 
-    sums = pixels.sum(axis=1)
-    mask = (sums > 50) & (sums < 700)
-    pixels_f = pixels[mask] if mask.any() else pixels
+    masked = small.copy()
+    masked[bg_dist.reshape(80, 80) <= 25] = np.nan
 
-    centers, labels = np_kmeans(pixels_f, k=3, iters=7)
-    vals, counts = np.unique(labels, return_counts=True)
-    dominant = centers[vals[counts.argmax()]]
-    r, g, b = map(int, dominant)
+    row_means = np.nanmean(masked, axis=1)   # (80, 3)
+    col_means = np.nanmean(masked, axis=0)   # (80, 3)
+    row_std   = np.nanstd(row_means, axis=0).mean()
+    col_std   = np.nanstd(col_means, axis=0).mean()
 
-    bucket = hsvish_bucket_name(r, g, b)
-    return bucket if bucket in {"black", "gray", "white", "blue", "red", "green"} \
-                  else closest_css_color((r, g, b))
+    STRIPE_T = 18.0
 
+    # Both axes vary → polka dots (circular spots create variance in both directions)
+    if row_std > STRIPE_T and col_std > STRIPE_T:
+        return "polka dot"
 
-def is_shorts_bbox(box, threshold=0.55):
-    # YOLOS normalized height (bh). Shorter boxes → shorts.
-    return float(box[3]) < threshold
+    # One axis varies strongly → stripes
+    if row_std > STRIPE_T or col_std > STRIPE_T:
+        return "striped"
+
+    return "solid"
 
 
-# ----------------- LABEL RULES -----------------
-PART_LABELS = {
-    "collar", "lapel", "epaulette", "sleeve", "pocket", "neckline", "buckle", "zipper",
-    "applique", "bead", "bow", "flower", "fringe", "ribbon", "rivet", "ruffle", "sequin",
-    "tassel", "button", "hem", "seam", "logo"
+# ══════════════════════════════════════════════════════════════
+#  VISION PROMPT  (shared by Anthropic + OpenAI)
+# ══════════════════════════════════════════════════════════════
+
+_VISION_PROMPT = """You are an expert clothing analyst. Examine this clothing image carefully and return a JSON object.
+
+Be VERY precise about these details:
+
+GARMENT TYPE — look at the exact cut:
+• Short sleeves ending above/at elbow → "t-shirt"
+• Long sleeves reaching the wrist → "long-sleeve"
+• No sleeves → "tank top"
+• Collar + short sleeves → "polo"
+• With hood → "hoodie"
+• Zip-up/button jacket → "jacket"
+• Longer outerwear → "coat"
+• One-piece dress → "dress"
+• Separate bottom flared/flowing → "skirt"
+• Full-length leg coverage → "pants" or "jeans" (if denim)
+• Knee-length or above leg coverage → "shorts"
+
+COLOR — be specific:
+• Pure white = "white", off-white/cream = "cream"
+• Light blue = "light blue", dark blue = "navy", medium blue = "blue"
+• Blue-green = "teal", yellow-green = "olive"
+• Tan/khaki/beige = "tan", light brown = "beige"
+• List ALL significant colors in the "colors" array (up to 3). Put the dominant one first and also in "color".
+
+PATTERN — be specific:
+• One uniform color throughout = "solid"
+• Alternating parallel bands/lines of color = "striped"
+• Intersecting horizontal and vertical lines forming a grid = "plaid"
+• Small repeated circular dots = "polka dot"
+• Flower or botanical prints = "floral"
+• Logo, text, or image screen-printed on = "graphic"
+• Irregular swirled or marbled colors = "abstract"
+• Rainbow swirl dye pattern = "tie-dye"
+• Spotted animal skin pattern (leopard, zebra, etc.) = "animal print"
+• Military-style irregular color patches = "camouflage"
+
+Return ONLY this JSON, no other text:
+{
+  "type": <one of: t-shirt, long-sleeve, shirt, blouse, tank top, crop top, polo, hoodie, sweatshirt, sweater, cardigan, jacket, coat, vest, blazer, dress, skirt, pants, jeans, shorts, leggings, jumpsuit, overalls, other>,
+  "color": <dominant color in plain English>,
+  "color_hex": <hex code for dominant color, e.g. "#2e5fa3">,
+  "colors": [<all significant colors as plain English strings, dominant first, up to 3>],
+  "colors_hex": [<hex code for each color in the colors array>],
+  "pattern": <one of: solid, striped, plaid, polka dot, floral, graphic, animal print, abstract, tie-dye, camouflage, other>,
+  "notes": <one sentence describing the item>
+}"""
+
+
+def _extract_json(text: str) -> dict:
+    """Parse JSON from model response, with regex fallback."""
+    text = text.strip()
+    match = re.search(r"\{[\s\S]*\}", text)
+    if match:
+        return json.loads(match.group())
+    return json.loads(text)
+
+
+# ══════════════════════════════════════════════════════════════
+#  VISION DETECTION — ANTHROPIC (primary)
+# ══════════════════════════════════════════════════════════════
+
+async def _vision_detect_anthropic(image_bytes: bytes, mime: str = "image/jpeg") -> dict:
+    b64 = base64.b64encode(image_bytes).decode()
+    for attempt in range(3):
+        try:
+            msg = await _ant.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=400,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {"type": "base64", "media_type": mime, "data": b64},
+                        },
+                        {"type": "text", "text": _VISION_PROMPT},
+                    ],
+                }],
+            )
+            return _extract_json(msg.content[0].text)
+        except Exception as e:
+            err = str(e).lower()
+            if "rate" in err or "529" in err or "overload" in err:
+                await asyncio.sleep(2 ** (attempt + 1))
+            else:
+                raise
+    raise RuntimeError("Anthropic vision failed after 3 attempts")
+
+
+# ══════════════════════════════════════════════════════════════
+#  VISION DETECTION — OPENAI (secondary)
+# ══════════════════════════════════════════════════════════════
+
+async def _vision_detect_openai(image_bytes: bytes, mime: str = "image/jpeg") -> dict:
+    b64 = base64.b64encode(image_bytes).decode()
+    for attempt in range(3):
+        try:
+            response = await _oai.chat.completions.create(
+                model="gpt-4o-mini",
+                temperature=0.1,
+                response_format={"type": "json_object"},
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "text",      "text": _VISION_PROMPT},
+                        {"type": "image_url", "image_url": {
+                            "url":    f"data:{mime};base64,{b64}",
+                            "detail": "high",
+                        }},
+                    ],
+                }],
+                max_tokens=400,
+            )
+            return json.loads(response.choices[0].message.content)
+        except Exception as e:
+            err = str(e).lower()
+            if "rate" in err or "429" in err or "overload" in err:
+                await asyncio.sleep(2 ** (attempt + 1))
+            else:
+                raise
+    raise RuntimeError("OpenAI vision failed after 3 attempts")
+
+
+# ══════════════════════════════════════════════════════════════
+#  YOLOS FALLBACK DETECTION
+# ══════════════════════════════════════════════════════════════
+
+YOLOS_GARMENT_MAP = {
+    "top, t-shirt, sweatshirt": "t-shirt",
+    "shirt, blouse":            "shirt",
+    "pants":                    "pants",
+    "jeans":                    "jeans",
+    "shorts":                   "shorts",
+    "skirt":                    "skirt",
+    "dress":                    "dress",
+    "jacket":                   "jacket",
+    "coat":                     "coat",
+    "cardigan":                 "cardigan",
+    "vest":                     "vest",
+    "sweater":                  "sweater",
+    "jumpsuit":                 "jumpsuit",
+    "cape":                     "jacket",
 }
-GARMENT_LABELS = {
-    "t-shirt", "shirt", "top", "sweatshirt", "hoodie", "blouse",
-    "pants", "jeans", "shorts", "skirt", "dress",
-    "jacket", "coat", "cardigan", "vest", "sweater"
-}
 
 
-def is_denim_color_name(name: Optional[str]) -> bool:
-    return bool(name) and any(k in name.lower() for k in ["denim", "indigo", "blue", "navy", "slate"])
+def _yolos_detect(pil_image: Image.Image) -> dict:
+    model, processor = _get_yolos()
+    img_w, img_h     = pil_image.size
 
-
-def is_blue_dominant(avg_rgb):
-    if len(avg_rgb) != 3:
-        return False
-    r, g, b = avg_rgb
-    return (b > r + 15) and (b > g + 15)
-
-
-def choose_final_label(labels: List[str], sleeve_type: str) -> str:
-    labels = [l.lower() for l in labels]
-    if "hoodie" in labels:
-        return "hoodie"
-    if any(l in labels for l in ["jacket", "coat", "cardigan", "vest"]):
-        return "jacket"
-    if "sweatshirt" in labels:
-        return "long-sleeve"
-    if any(l in labels for l in ["t-shirt", "shirt", "top", "blouse"]):
-        return "long-sleeve" if sleeve_type == "long" else "t-shirt"
-    if "jeans" in labels:
-        return "jeans"
-    if "pants" in labels:
-        return "pants"
-    if "shorts" in labels:
-        return "shorts"
-    if "skirt" in labels:
-        return "skirt"
-    if "dress" in labels:
-        return "dress"
-    return labels[0] if labels else "unknown"
-
-
-# ----------------- CORE INFERENCE PER IMAGE -----------------
-def detect_items_in_image(pil_image: Image.Image):
-    w, h = pil_image.size
     inputs = processor(images=pil_image, return_tensors="pt")
     with torch.no_grad():
         outputs = model(**inputs)
 
-    logits = outputs.logits
-    bboxes = outputs.pred_boxes
-    probabilities = logits.softmax(-1)[0, :, :-1]
-    scores, labels = probabilities.max(-1)
+    probs             = outputs.logits.softmax(-1)[0, :, :-1]
+    scores, label_ids = probs.max(-1)
+    bboxes            = outputs.pred_boxes[0]
 
-    # sleeve detection from part labels
-    sleeve_height_ratio = 0.0
-    rivet_count = 0
-    garments = []
+    best_garment = None
+    rivet_count  = 0
 
-    for score, label, box in zip(scores, labels, bboxes[0]):
-        raw_label = model.config.id2label[label.item()].lower()
-        if "sleeve" in raw_label and score > 0.5:
-            sleeve_height_ratio = max(sleeve_height_ratio, float(box[3].item()))
-        if raw_label in GARMENT_LABELS and score > 0.4:
-            garments.append({
-                "raw_label": raw_label,
-                "score": float(score.item()),
-                "box": box.tolist()
-            })
-        elif raw_label in PART_LABELS and score > 0.5 and raw_label == "rivet":
+    for sc, lid, box in zip(scores, label_ids, bboxes):
+        raw  = model.config.id2label[lid.item()]
+        sc_f = float(sc.item())
+        if raw in YOLOS_GARMENT_MAP and sc_f > 0.35:
+            if best_garment is None or sc_f > best_garment["score"]:
+                best_garment = {"raw": raw, "score": sc_f, "box": box.tolist()}
+        elif raw == "rivet" and sc_f > 0.5:
             rivet_count += 1
 
-    sleeve_type = "short" if sleeve_height_ratio < 0.2 else "long" if sleeve_height_ratio > 0.5 else "medium"
+    if best_garment is None:
+        color_name, hex_str = dominant_color_from_image(pil_image)
+        ratio = img_h / max(img_w, 1)
+        garment_type = "pants" if ratio > 1.5 else "t-shirt"
+        pattern = detect_pattern(pil_image)
+        return {"type": garment_type, "color": color_name, "color_hex": hex_str,
+                "pattern": pattern, "notes": ""}
 
-    detected_items = []
-    for g in garments:
-        final_label = choose_final_label([g["raw_label"]], sleeve_type)
+    mapped = YOLOS_GARMENT_MAP[best_garment["raw"]]
+    box    = best_garment["box"]
 
-        color_name = get_color_from_bbox(pil_image, g["box"], w, h)
-        avg_rgb = get_avg_rgb_from_bbox(pil_image, g["box"], w, h)
+    color_name, hex_str = _color_from_bbox(pil_image, box, img_w, img_h)
+    pattern = _pattern_from_bbox(pil_image, box, img_w, img_h)
 
-        if final_label == "pants":
-            if is_shorts_bbox(g["box"]):
-                final_label = "shorts"
-            else:
-                blue_by_name = is_denim_color_name(color_name)
-                blue_by_rgb = is_blue_dominant(avg_rgb)
-                if (rivet_count >= 2 and (blue_by_name or blue_by_rgb)) or rivet_count >= 4:
-                    final_label = "jeans"
+    # Sleeve length cannot be reliably detected from pixels alone.
+    # Set ANTHROPIC_API_KEY or OPENAI_API_KEY for accurate sleeve detection.
 
-        detected_items.append({
-            "label": final_label,
-            "color": color_name,
-            "color_hex": rgb_to_hex(tuple(avg_rgb)),
-            "bbox": g["box"],
-            "avg_rgb": avg_rgb
-        })
+    if mapped == "pants":
+        bh = float(box[3])
+        if bh < 0.50:
+            mapped = "shorts"
+        elif rivet_count >= 2 and color_name in {"blue", "navy", "light blue", "indigo"}:
+            mapped = "jeans"
 
-    # fallback: nothing detected
-    if not detected_items:
-        fallback_name = get_dominant_color(pil_image)
-        avg_rgb = np.array(pil_image).mean(axis=(0, 1)).astype(int).tolist()
-        if rivet_count >= 3:
-            label = "jeans" if is_denim_color_name(fallback_name) or is_blue_dominant(avg_rgb) else "pants"
-        else:
-            label = "t-shirt" if (h / max(1, w)) < 1.5 else "pants"
-        detected_items.append({
-            "label": label,
-            "color": fallback_name,
-            "color_hex": rgb_to_hex(tuple(avg_rgb)),
-            "bbox": [0.5, 0.5, 1.0, 1.0],
-            "avg_rgb": avg_rgb
-        })
+    # If YOLOS said "jeans" but color isn't blue, it's probably just dark pants
+    if mapped == "jeans" and color_name not in {"blue", "navy", "light blue", "indigo",
+                                                  "darkblue", "midnightblue", "steelblue"}:
+        mapped = "pants"
 
-    return detected_items
+    return {"type": mapped, "color": color_name, "color_hex": hex_str,
+            "pattern": pattern, "notes": ""}
 
 
-# ----------------- ROUTES -----------------
-@app.get("/")
-def home():
-    return {"message": "Clothing detection API running with YOLOS-Fashionpedia!"}
+def _color_from_bbox(pil_image: Image.Image, bbox: list, img_w: int, img_h: int) -> tuple:
+    cx, cy, bw, bh = bbox
+    # Crop aggressively inward (30%) to avoid model skin/background bleed at edges
+    shrink = 0.30
+    x0 = max(0, int((cx - bw * (0.5 - shrink)) * img_w))
+    y0 = max(0, int((cy - bh * (0.5 - shrink)) * img_h))
+    x1 = min(img_w, int((cx + bw * (0.5 - shrink)) * img_w))
+    y1 = min(img_h, int((cy + bh * (0.5 - shrink)) * img_h))
+    if x1 <= x0 or y1 <= y0:
+        return dominant_color_from_image(pil_image)
+    return dominant_color_from_image(pil_image.crop((x0, y0, x1, y1)))
 
 
-@app.post("/detect")
+def _pattern_from_bbox(pil_image: Image.Image, bbox: list, img_w: int, img_h: int) -> str:
+    cx, cy, bw, bh = bbox
+    shrink = 0.15
+    x0 = max(0, int((cx - bw * (0.5 - shrink)) * img_w))
+    y0 = max(0, int((cy - bh * (0.5 - shrink)) * img_h))
+    x1 = min(img_w, int((cx + bw * (0.5 - shrink)) * img_w))
+    y1 = min(img_h, int((cy + bh * (0.5 - shrink)) * img_h))
+    crop = pil_image.crop((x0, y0, x1, y1)) if x1 > x0 and y1 > y0 else pil_image
+    return detect_pattern(crop)
+
+
+def _sleeve_type(pil_image: Image.Image, bbox: list) -> str:
+    """
+    Compare garment coverage at shoulder level vs mid-arm level.
+    Long-sleeve shirts stay wide throughout; t-shirts narrow to just the torso below the sleeve stub.
+    """
+    cx, cy, bw, bh = bbox
+    w, h = pil_image.size
+    x0 = max(0, int((cx - bw / 2) * w)); x1 = min(w, int((cx + bw / 2) * w))
+    y0 = max(0, int((cy - bh / 2) * h)); y1 = min(h, int((cy + bh / 2) * h))
+    if x1 - x0 < 60 or y1 - y0 < 60:
+        return "short"
+
+    crop    = np.array(pil_image.crop((x0, y0, x1, y1)).resize((100, 100)))
+    corners = np.vstack([crop[:8, :8], crop[:8, 92:],
+                         crop[92:, :8], crop[92:, 92:]]).reshape(-1, 3).astype(float)
+    bg      = corners.mean(0)
+
+    def coverage(strip):
+        diffs = np.linalg.norm(strip.reshape(-1, 3).astype(float) - bg, axis=1)
+        return (diffs > 30).mean()
+
+    shoulder = coverage(crop[10:25])   # top 10-25 %: shoulder + top-of-sleeve
+    mid_arm  = coverage(crop[40:60])   # mid 40-60 %: where long sleeve hangs, t-shirt torso only
+
+    if shoulder < 0.30:
+        return "short"   # too little garment to judge
+
+    # Long-sleeve: mid-arm nearly as wide as shoulder (ratio > 0.72)
+    # T-shirt: mid-arm is just the narrow torso (ratio < 0.72)
+    return "long" if (mid_arm / shoulder) > 0.72 else "short"
+
+
+# ══════════════════════════════════════════════════════════════
+#  MAIN DETECTION ORCHESTRATOR
+# ══════════════════════════════════════════════════════════════
+
+def _mime_from_bytes(image_bytes: bytes) -> str:
+    if image_bytes[:4] == b"\x89PNG":    return "image/png"
+    if image_bytes[:6] in (b"GIF87a", b"GIF89a"): return "image/gif"
+    if image_bytes[:4] == b"RIFF":      return "image/webp"
+    return "image/jpeg"
+
+
+def _normalise(result: dict, source: str) -> dict:
+    primary_color = result.get("color", "unknown").lower().strip()
+    primary_hex   = result.get("color_hex", "#cccccc")
+    raw_colors    = result.get("colors", [])
+    raw_hexes     = result.get("colors_hex", [])
+
+    colors     = [c.lower().strip() for c in raw_colors] if raw_colors else [primary_color]
+    colors_hex = list(raw_hexes) if raw_hexes else [primary_hex]
+
+    # Keep arrays same length
+    while len(colors_hex) < len(colors):
+        colors_hex.append("#cccccc")
+
+    return {
+        "label":      result.get("type", "unknown").lower().strip(),
+        "color":      colors[0] if colors else primary_color,
+        "color_hex":  colors_hex[0] if colors_hex else primary_hex,
+        "colors":     colors,
+        "colors_hex": colors_hex,
+        "pattern":    result.get("pattern", "solid").lower().strip(),
+        "notes":      result.get("notes", ""),
+        "source":     source,
+    }
+
+
+async def detect_clothing(image_bytes: bytes) -> dict:
+    mime = _mime_from_bytes(image_bytes)
+
+    # 1. Claude Haiku vision
+    if ANTHROPIC_AVAILABLE and _ant is not None:
+        try:
+            result = await _vision_detect_anthropic(image_bytes, mime)
+            return _normalise(result, "claude-vision")
+        except Exception as e:
+            print(f"[claude-vision] failed ({e}), trying next")
+
+    # 2. GPT-4o-mini vision
+    if OPENAI_AVAILABLE and _oai is not None:
+        try:
+            result = await _vision_detect_openai(image_bytes, mime)
+            return _normalise(result, "gpt-vision")
+        except Exception as e:
+            print(f"[gpt-vision] failed ({e}), trying YOLOS")
+
+    # 3. YOLOS local model
+    try:
+        pil = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        r   = _yolos_detect(pil)
+        return _normalise(r, "yolos")
+    except Exception as e:
+        print(f"[yolos] failed ({e}), using heuristic")
+
+    # 4. Heuristic last resort
+    try:
+        pil = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        color_name, hex_str = dominant_color_from_image(pil)
+        w, h = pil.size
+        label   = "pants" if h / max(w, 1) > 1.5 else "t-shirt"
+        pattern = detect_pattern(pil)
+        return {"label": label, "color": color_name, "color_hex": hex_str,
+                "pattern": pattern, "notes": "", "source": "heuristic"}
+    except Exception:
+        return {"label": "unknown", "color": "unknown", "color_hex": "#cccccc",
+                "pattern": "solid", "notes": "", "source": "error"}
+
+
+# ══════════════════════════════════════════════════════════════
+#  ROUTES
+# ══════════════════════════════════════════════════════════════
+
+@app.get("/", tags=["health"])
+def health():
+    return {
+        "status":             "ok",
+        "anthropic_vision":   ANTHROPIC_AVAILABLE,
+        "openai_vision":      OPENAI_AVAILABLE,
+        "yolos_loaded":       _yolos_model is not None,
+    }
+
+
+@app.post("/detect", tags=["inference"])
 async def detect(
-    file: UploadFile = File(None),
+    file:  UploadFile = File(None),
     image: UploadFile = File(None),
-    files: Optional[List[UploadFile]] = File(None)
+    files: Optional[List[UploadFile]] = File(None),
 ):
-    """
-    Accepts: 'file' or 'image' (single) OR 'files' (list).
-    - If exactly one file was uploaded, return {"detected_items":[...]}.
-    - If multiple files were uploaded, return {"results":[...]}.
-    """
     file_list: List[UploadFile] = []
-    if files and len(files) > 0:
-        file_list = files
-    else:
-        upl = file or image
-        if upl is not None:
-            file_list = [upl]
+    if files:
+        file_list = list(files)
+    elif file or image:
+        file_list = [f for f in (file, image) if f is not None]
 
     if not file_list:
+        raise HTTPException(422, "No file provided. Use 'file', 'image', or 'files'.")
+
+    all_results = []
+    for i, upload in enumerate(file_list):
+        if i > 0 and AI_AVAILABLE:
+            await asyncio.sleep(0.3)
+
+        raw_bytes = await upload.read()
+        if not raw_bytes:
+            all_results.append({"filename": upload.filename, "detected_items": []})
+            continue
+        try:
+            item = await detect_clothing(raw_bytes)
+            all_results.append({"filename": upload.filename, "detected_items": [item]})
+        except Exception as exc:
+            err_msg = str(exc)
+            if "rate" in err_msg.lower() or "429" in err_msg:
+                err_msg = "rate_limit"
+            all_results.append({
+                "filename": upload.filename,
+                "error":    err_msg,
+                "detected_items": [],
+            })
+
+    if len(all_results) == 1:
+        return all_results[0]
+    return {"results": all_results}
+
+
+# ══════════════════════════════════════════════════════════════
+#  AI OUTFIT + MATCH  (works with Anthropic or OpenAI)
+# ══════════════════════════════════════════════════════════════
+
+class ItemPayload(BaseModel):
+    id:      int
+    type:    str = "unknown"
+    color:   str = "unknown"
+    pattern: str = ""
+    event:   str = ""
+    tags:    str = ""
+
+class SuggestRequest(BaseModel):
+    items:       List[ItemPayload]
+    occasion:    str   = ""
+    time_of_day: str   = ""
+    weather:     str   = ""
+    temp_f:      Optional[float] = None
+
+class ItemAttributes(BaseModel):
+    type:    str = "unknown"
+    color:   str = "unknown"
+    pattern: str = ""
+    event:   str = ""
+
+class MatchRequest(BaseModel):
+    item_a: ItemAttributes
+    item_b: ItemAttributes
+
+
+def _require_ai():
+    if not AI_AVAILABLE:
         raise HTTPException(
-            status_code=422,
-            detail="No file provided (expected 'file', 'image', or 'files')."
+            503,
+            "No AI key set. Set ANTHROPIC_API_KEY or OPENAI_API_KEY and restart."
         )
 
-    results_all = []
-    for f in file_list:
-        content = await f.read()
-        if not content:
-            results_all.append({"filename": getattr(f, "filename", None), "detected_items": []})
-            continue
 
-        pil_image = Image.open(io.BytesIO(content)).convert("RGB")
-        detected_items = detect_items_in_image(pil_image)
+async def _chat(system: str, user: str, temperature: float = 0.7) -> str:
+    """Run a text chat using whichever AI backend is available."""
+    if ANTHROPIC_AVAILABLE and _ant is not None:
+        msg = await _ant.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=600,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        return msg.content[0].text
 
-        w, h = pil_image.size
-        tall = (h / max(1, w)) > 1.4
+    if OPENAI_AVAILABLE and _oai is not None:
+        r = await _oai.chat.completions.create(
+            model="gpt-4o-mini",
+            temperature=temperature,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user",   "content": user},
+            ],
+        )
+        return r.choices[0].message.content
 
-        # refine full-image t-shirt fallback -> long-sleeve if sleeves detected
-        if (
-            len(detected_items) == 1
-            and detected_items[0].get("label") in {"t-shirt", "unknown"}
-            and detected_items[0].get("bbox") == [0.5, 0.5, 1.0, 1.0]
-        ):
-            if not tall and sleeve_likely_by_edges(pil_image, getattr(f, "filename", None)):
-                detected_items[0]["label"] = "long-sleeve"
-
-        results_all.append({
-            "filename": getattr(f, "filename", None),
-            "detected_items": detected_items
-        })
-
-    if len(results_all) == 1:
-        return {"detected_items": results_all[0]["detected_items"]}
-    else:
-        return {"results": results_all}
+    raise RuntimeError("No AI backend available")
 
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+@app.post("/suggest", tags=["ai"])
+async def suggest(req: SuggestRequest) -> Dict[str, Any]:
+    _require_ai()
+    if not req.items:
+        raise HTTPException(422, "items list is empty")
+
+    # Build context string from occasion / time / weather
+    ctx_parts = []
+    if req.occasion:    ctx_parts.append(f"Occasion: {req.occasion}")
+    if req.time_of_day: ctx_parts.append(f"Time of day: {req.time_of_day}")
+    if req.weather:     ctx_parts.append(f"Current weather: {req.weather}")
+    if req.temp_f is not None:
+        feel = ("very cold" if req.temp_f < 32 else
+                "cold"      if req.temp_f < 50 else
+                "cool"      if req.temp_f < 65 else
+                "warm"      if req.temp_f < 80 else "hot")
+        ctx_parts.append(f"Feel: {feel}")
+    context = " | ".join(ctx_parts) if ctx_parts else "No specific context"
+
+    sys_prompt = (
+        "You are a professional fashion stylist. Pick 2-4 items from the wardrobe that work "
+        "well together given the context below. Think about:\n"
+        "• Weather & temperature: suggest layers for cold/cool, light pieces for warm/hot, "
+        "  waterproof or cover-up items for rain\n"
+        "• Time of day: relaxed for morning, put-together for afternoon, elevated for evening/night\n"
+        "• Occasion: match formality — casual for errands, polished for work, dressed-up for formal\n"
+        "• Colour harmony: complementary or matching tones\n\n"
+        "Return ONLY JSON with keys:\n"
+        '  "outfit": [{id, reason_for_pick}, ...]\n'
+        '  "reason": 1-2 sentences explaining why this outfit fits the context.\n'
+        "Only use item IDs from the list provided."
+    )
+    user_msg = f"Context: {context}\n\nWardrobe:\n{json.dumps([i.model_dump() for i in req.items])}"
+
+    try:
+        raw  = await _chat(sys_prompt, user_msg)
+        data = _extract_json(raw)
+        valid = {i.id for i in req.items}
+        data["outfit"] = [o for o in data.get("outfit", []) if isinstance(o.get("id"), int) and o["id"] in valid]
+        return data
+    except Exception as e:
+        raise HTTPException(502, str(e))
+
+
+@app.post("/match", tags=["ai"])
+async def match(req: MatchRequest) -> Dict[str, Any]:
+    _require_ai()
+    sys = (
+        "You are a fashion stylist. Rate how well two items go together. Return JSON:\n"
+        '  "rating": "Great Match" | "Works" | "Clash"\n'
+        '  "explanation": 1-2 sentences\n'
+        '  "tips": [] or up to 2 short tips\n'
+        "Return ONLY JSON."
+    )
+    try:
+        raw  = await _chat(sys, f"A: {req.item_a.model_dump()}\nB: {req.item_b.model_dump()}", 0.4)
+        data = _extract_json(raw)
+        r    = data.get("rating", "Works").lower()
+        data["rating"] = "Great Match" if "great" in r else "Clash" if "clash" in r else "Works"
+        data.setdefault("explanation", "")
+        data.setdefault("tips", [])
+        return data
+    except Exception as e:
+        raise HTTPException(502, str(e))
