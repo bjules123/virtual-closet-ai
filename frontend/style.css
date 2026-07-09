@@ -1399,6 +1399,23 @@ body {
 }
 .soc-lazy-btn:hover { background: rgba(196,113,79,.08); }
 
+/* Gap piece placeholder — shown when store+query not in cache */
+.gap-store-placeholder {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 14px 12px; background: var(--neutral-50);
+  border: 1.5px dashed var(--neutral-300);
+  border-radius: var(--radius-md);
+  align-items: center; text-align: center;
+}
+.gap-store-ph-text { font-size: .72rem; color: var(--neutral-400); line-height: 1.4; }
+.gap-store-search-btn {
+  font-size: .72rem; font-weight: 700; color: #C4714F;
+  background: rgba(196,113,79,.08); border: 1.5px solid #C4714F;
+  border-radius: var(--radius-sm); padding: 7px 16px;
+  cursor: pointer; transition: background .15s; white-space: nowrap;
+}
+.gap-store-search-btn:hover { background: rgba(196,113,79,.18); }
+
 /* Card actions */
 .soc-actions { display: flex; flex-direction: column; gap: 8px; }
 .soc-closet-summary {

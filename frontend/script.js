@@ -1888,16 +1888,66 @@ async function _renderBuildResults(modal) {
   await Promise.all(gaps.map(m => _fetchGapProduct(m.idx, m.gap_query || m.piece, "")));
 }
 
+// Read localStorage cache without any live call.
+// Returns results array if fresh, null if missing or expired.
+function _serpCacheGet(q) {
+  try {
+    const raw = localStorage.getItem("serp_cache_" + q);
+    if (!raw) return null;
+    const p = JSON.parse(raw);
+    return (Date.now() - p.cachedAt) < _SERP_TTL ? p.results : null;
+  } catch { return null; }
+}
+
+// Placeholder card shown when a store+query combo is not cached yet.
+function _gapPlaceholder(gapIdx, rawQuery, store) {
+  return `<div class="gap-store-placeholder">
+    <span class="gap-store-ph-text">No saved results for ${escHtml(store)}</span>
+    <button class="gap-store-search-btn"
+      onclick="searchGapStore(${gapIdx},${JSON.stringify(rawQuery)},${JSON.stringify(store)})">
+      Search ${escHtml(store)} →
+    </button>
+  </div>`;
+}
+
+// Fired when user explicitly clicks "Search [Store] →" on a placeholder.
+async function searchGapStore(gapIdx, rawQuery, store) {
+  const el = document.getElementById(`gap-${gapIdx}`);
+  if (el) el.innerHTML = `<div class="ai-thinking" style="display:flex;gap:10px"><div class="ai-spinner"></div><span>Searching…</span></div>`;
+  await _fetchGapProduct(gapIdx, rawQuery, store);
+}
+
 async function switchBuildStore(store, btn) {
   document.querySelectorAll(".build-store-filter .chip").forEach(c => c.classList.remove("active"));
   btn.classList.add("active");
 
   const gaps = _buildMatches.map((m, i) => ({...m, idx: i})).filter(m => !m.closet_item && m.closet_item !== 0);
-  gaps.forEach(m => {
+
+  await Promise.all(gaps.map(async m => {
     const el = document.getElementById(`gap-${m.idx}`);
-    if (el) el.innerHTML = `<div class="ai-thinking" style="display:flex"><div class="ai-spinner"></div><span>Searching…</span></div>`;
-  });
-  await Promise.all(gaps.map(m => _fetchGapProduct(m.idx, m.gap_query || m.piece, store)));
+    if (!el) return;
+    const rawQuery = m.gap_query || m.piece;
+    const cleaned  = _cleanGapQuery(rawQuery);
+
+    if (!store) {
+      // "All" — restore no-store results cached from the initial build (always free)
+      await _fetchGapProduct(m.idx, rawQuery, "");
+      return;
+    }
+
+    // Specific store: check both the full query and the simpler fallback for a cache hit
+    const storeQ   = `${cleaned} ${store}`;
+    const simplerQ = `${_simplerQuery(cleaned)} ${store}`;
+    const hasCached = _serpCacheGet(storeQ) !== null || _serpCacheGet(simplerQ) !== null;
+
+    if (hasCached) {
+      // Free — _fetchGapProduct will read from cache with no live call
+      await _fetchGapProduct(m.idx, rawQuery, store);
+    } else {
+      // Not cached — show placeholder; user decides when to spend a call
+      el.innerHTML = _gapPlaceholder(m.idx, rawQuery, store);
+    }
+  }));
 }
 
 // Strip vibe/style/aesthetic words — query must be [shade] [silhouette] [type] only.
