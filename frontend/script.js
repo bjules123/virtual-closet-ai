@@ -3,7 +3,7 @@
    ============================================================ */
 
 /* ── Constants ── */
-const BACKEND = "http://127.0.0.1:8000";
+const BACKEND = "https://virtual-closet-gkz7.onrender.com";
 
 const TOPS    = ["t-shirt","shirt","top","blouse","sweater","sweatshirt","hoodie","long-sleeve","tank","camisole","crop top","polo"];
 const BOTTOMS = ["pants","jeans","shorts","skirt","leggings","trousers"];
