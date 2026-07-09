@@ -10,10 +10,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400;1,600&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-
+  
   <!-- ===== SIDEBAR NAV ===== -->
   <nav class="sidebar" id="sidebar">
     <div class="sidebar-header">
@@ -37,6 +39,12 @@
       </button></li>
       <li><button class="nav-btn" data-tab="outfits">
         <span class="nav-icon">✨</span> Outfit Ideas
+      </button></li>
+      <li><button class="nav-btn" data-tab="inspo">
+        <span class="nav-icon">🎨</span> Inspo Board
+      </button></li>
+      <li><button class="nav-btn" data-tab="shop">
+        <span class="nav-icon">🛍️</span> Shop Outfits
       </button></li>
       <li><button class="nav-btn" data-tab="match">
         <span class="nav-icon">🔀</span> Match Check
@@ -64,44 +72,118 @@
     <!-- HOME TAB -->
     <section id="tab-home" class="tab active">
       <div class="hero">
+        <!-- Left: editorial text -->
         <div class="hero-text">
-          <h1>Your AI-Powered<br/><span class="gradient-text">Virtual Closet</span></h1>
-          <p>Upload your clothes, get AI detection for type &amp; color, then let the app suggest outfits for you.</p>
+          <span class="hero-eyebrow">Your AI Stylist</span>
+          <h1 class="hero-headline">Your wardrobe,<br>smarter.</h1>
+          <p class="hero-sub">Upload your clothes, build outfits from what you own, save inspo, and shop real products — all in one place.</p>
           <div class="hero-actions">
-            <button class="btn-primary" onclick="showTab('add')">➕ Add Your First Item</button>
-            <button class="btn-secondary" onclick="showTab('closet')">View My Closet</button>
+            <button class="hero-btn-primary" onclick="showTab('add')">Add Your First Item</button>
+            <button class="hero-btn-secondary" onclick="showTab('closet')">View My Closet</button>
           </div>
         </div>
-        <div class="hero-visual">
-          <div class="hero-cards">
-            <div class="mini-card" style="--r:0deg">👗</div>
-            <div class="mini-card" style="--r:12deg">👔</div>
-            <div class="mini-card" style="--r:-8deg">👖</div>
-            <div class="mini-card" style="--r:20deg">🧥</div>
+
+        <!-- Right: CSS card collage -->
+        <div class="hero-collage" aria-hidden="true">
+
+          <!-- Card 1: Closet view (largest, -3deg) -->
+          <div class="hc-card hc-closet-card">
+            <svg class="hc-closet-svg" viewBox="0 0 210 190" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <!-- Hanging rod -->
+              <rect x="15" y="56" width="180" height="4" rx="2" fill="#C5B9A8"/>
+              <!-- Hanger 1 -->
+              <line x1="62" y1="56" x2="62" y2="44" stroke="#C5B9A8" stroke-width="1.5"/>
+              <path d="M62 44 Q62 32 74 29 Q86 26 86 38 L86 44" stroke="#C5B9A8" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+              <!-- Garment 1: tan top -->
+              <rect x="38" y="60" width="48" height="64" rx="6" fill="#D0C2B0"/>
+              <!-- Hanger 2 -->
+              <line x1="107" y1="56" x2="107" y2="44" stroke="#C5B9A8" stroke-width="1.5"/>
+              <path d="M107 44 Q107 32 119 29 Q131 26 131 38 L131 44" stroke="#C5B9A8" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+              <!-- Garment 2: slate dress -->
+              <rect x="83" y="60" width="48" height="104" rx="6" fill="#BCBACB"/>
+              <!-- Hanger 3 -->
+              <line x1="156" y1="56" x2="156" y2="44" stroke="#C5B9A8" stroke-width="1.5"/>
+              <path d="M156 44 Q156 32 168 29 Q180 26 180 38 L180 44" stroke="#C5B9A8" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+              <!-- Garment 3: sage top -->
+              <rect x="132" y="60" width="48" height="76" rx="6" fill="#B8C9B5"/>
+            </svg>
+            <div class="hc-closet-label">My Closet · 24 items</div>
           </div>
+
+          <!-- Card 2: Shopping card (+4deg) -->
+          <div class="hc-card hc-shop-card">
+            <div class="hc-product-img"></div>
+            <div class="hc-product-details">
+              <div class="hc-product-name">Linen Wide Leg Trouser</div>
+              <div class="hc-product-row">
+                <span class="hc-product-price">$49.99</span>
+                <span class="hc-product-store">Zara</span>
+              </div>
+              <div class="hc-shop-now">Shop Now →</div>
+            </div>
+          </div>
+
+          <!-- Card 3: Inspo card (smallest, top right, +8deg) -->
+          <div class="hc-card hc-inspo-card">
+            <svg class="hc-silhouette-svg" viewBox="0 0 80 124" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <!-- Head -->
+              <ellipse cx="40" cy="18" rx="13" ry="15" fill="#C8B49A"/>
+              <!-- Neck -->
+              <rect x="36" y="31" width="8" height="8" rx="2" fill="#C8B49A"/>
+              <!-- Body -->
+              <rect x="28" y="38" width="24" height="36" rx="5" fill="#C8B49A"/>
+              <!-- Flared legs -->
+              <path d="M28 74 L14 124 L34 124 L40 84 L46 124 L66 124 L52 74 Z" fill="#C8B49A"/>
+            </svg>
+            <span class="hc-badge">euro summer</span>
+          </div>
+
         </div>
       </div>
 
       <div class="feature-grid">
         <div class="feature-card">
-          <span class="feature-icon">🤖</span>
+          <div class="feature-icon">
+            <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+              <path d="M11 2L19.5 7V15L11 20L2.5 15V7L11 2Z" stroke="var(--purple-600)" stroke-width="1.5" stroke-linejoin="round"/>
+              <circle cx="11" cy="11" r="2.5" fill="var(--purple-600)"/>
+            </svg>
+          </div>
           <h3>AI Detection</h3>
-          <p>YOLOS-Fashionpedia model auto-detects clothing type and dominant color from any photo.</p>
+          <p>Automatically identifies clothing type and color from any photo you upload.</p>
         </div>
         <div class="feature-card">
-          <span class="feature-icon">🔍</span>
+          <div class="feature-icon">
+            <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+              <circle cx="10" cy="10" r="6.5" stroke="var(--purple-600)" stroke-width="1.5"/>
+              <path d="M15 15L19 19" stroke="var(--purple-600)" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </div>
           <h3>Smart Search</h3>
-          <p>Filter your closet by type, color, tag, or occasion in an instant.</p>
+          <p>Filter your closet by type, color, tag, or occasion in seconds.</p>
         </div>
         <div class="feature-card">
-          <span class="feature-icon">✨</span>
+          <div class="feature-icon">
+            <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+              <rect x="3" y="3" width="7" height="7" rx="2" stroke="var(--purple-600)" stroke-width="1.5"/>
+              <rect x="12" y="3" width="7" height="7" rx="2" stroke="var(--purple-600)" stroke-width="1.5"/>
+              <rect x="3" y="12" width="7" height="7" rx="2" stroke="var(--purple-600)" stroke-width="1.5"/>
+              <rect x="12" y="12" width="7" height="7" rx="2" stroke="var(--purple-600)" stroke-width="1.5"/>
+            </svg>
+          </div>
           <h3>Outfit Ideas</h3>
-          <p>Get a randomized outfit suggestion or browse curated combos from your wardrobe.</p>
+          <p>Get complete outfit suggestions built from what you already own.</p>
         </div>
         <div class="feature-card">
-          <span class="feature-icon">📅</span>
-          <h3>Planner</h3>
-          <p>Plan your outfits for the week and never stress about getting dressed again.</p>
+          <div class="feature-icon">
+            <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+              <rect x="3" y="5" width="16" height="14" rx="2" stroke="var(--purple-600)" stroke-width="1.5"/>
+              <path d="M3 9H19" stroke="var(--purple-600)" stroke-width="1.5"/>
+              <path d="M7 3V7M15 3V7" stroke="var(--purple-600)" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <h3>Weekly Planner</h3>
+          <p>Plan your outfits for the week so mornings are easy.</p>
         </div>
       </div>
 
@@ -124,25 +206,12 @@
         </div>
       </div>
 
-      <!-- Style DNA — visible after 5+ items -->
+      <!-- Style profile — visible after 5+ items -->
       <div class="style-dna" id="styleDna" style="display:none">
-        <div class="dna-header">
-          <div>
-            <h3>Your Style DNA</h3>
-            <p>Based on your wardrobe</p>
-          </div>
-          <span class="dna-personality" id="dnaPersonality"></span>
-        </div>
-        <div class="dna-body">
-          <div class="dna-section">
-            <div class="dna-section-label">Dominant Colors</div>
-            <div class="dna-swatches" id="dnaSwatches"></div>
-          </div>
-          <div class="dna-section">
-            <div class="dna-section-label">Wardrobe Breakdown</div>
-            <div class="dna-bar-wrap" id="dnaBreakdown"></div>
-          </div>
-        </div>
+        <div class="sdna-headline" id="sdnaHeadline"></div>
+        <p class="sdna-para" id="sdnaPara"></p>
+        <div class="sdna-colors" id="sdnaColors"></div>
+        <p class="sdna-inspo-line" id="sdnaInspoLine" style="display:none"></p>
       </div>
     </section>
 
@@ -261,6 +330,8 @@
           <button class="chip" data-filter="bottoms" onclick="setFilter('bottoms', this)">Bottoms</button>
           <button class="chip" data-filter="jackets" onclick="setFilter('jackets', this)">Jackets</button>
           <button class="chip" data-filter="dresses" onclick="setFilter('dresses', this)">Dresses</button>
+          <button class="chip" data-filter="shoes" onclick="setFilter('shoes', this)">Shoes</button>
+          <button class="chip" data-filter="accessories" onclick="setFilter('accessories', this)">Accessories</button>
           <button class="chip" data-filter="other" onclick="setFilter('other', this)">Other</button>
         </div>
         <div class="view-toggle">
@@ -327,7 +398,106 @@
       <div id="outfitHistory" class="outfit-history"></div>
     </section>
 
+    <!-- INSPO BOARD TAB -->
+    <section id="tab-inspo" class="tab">
+      <div class="page-header">
+        <h2>Inspo Board</h2>
+        <p>Save outfit inspiration from Pinterest or your camera roll, then let AI build it from your closet.</p>
+      </div>
+
+      <div class="inspo-input-row">
+        <!-- Pinterest URL import -->
+        <div class="inspo-url-box">
+          <div class="inspo-input-label">Pinterest URL</div>
+          <div class="inspo-url-row">
+            <input type="text" id="inspoUrlInput" class="inspo-url-field" placeholder="Paste a Pinterest pin URL…" />
+            <button class="btn-primary" onclick="importPinterestUrl()">Import</button>
+          </div>
+          <div id="inspoUrlStatus" class="inspo-url-status" style="display:none"></div>
+        </div>
+        <!-- Direct image upload -->
+        <div class="inspo-upload-box" id="inspoUploadZone">
+          <input type="file" id="inspoUpload" accept="image/*" hidden />
+          <div class="inspo-drop-inner">
+            <span class="inspo-drop-icon">📷</span>
+            <p>Drop an image or <span class="link-text">browse</span></p>
+            <p class="upload-hint">JPG · PNG · WEBP</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Analyzing spinner -->
+      <div class="ai-thinking" id="inspoAnalyzing" style="display:none">
+        <div class="ai-spinner"></div>
+        <span>Analyzing your inspo…</span>
+      </div>
+
+      <!-- Masonry grid -->
+      <div id="inspoGrid" class="inspo-grid"></div>
+
+      <!-- Empty state -->
+      <div id="inspoEmpty" class="empty-state">
+        <span class="empty-icon">🎨</span>
+        <p>Add your first inspo image — paste a Pinterest link or upload a photo</p>
+      </div>
+    </section>
+
     <!-- MATCH CHECK TAB -->
+    <section id="tab-shop" class="tab">
+      <div class="page-header">
+        <h2>Shop Outfits</h2>
+        <p>Complete looks you can buy right now</p>
+      </div>
+
+      <div class="shop-outfits-filters">
+        <div class="sof-filter-row">
+          <div class="sof-group-label">Occasion</div>
+          <div class="sof-chip-group" id="sofOccasion">
+            <button class="sof-chip active" data-val="">All</button>
+            <button class="sof-chip" data-val="Casual">Casual</button>
+            <button class="sof-chip" data-val="Work">Work</button>
+            <button class="sof-chip" data-val="Date Night">Date Night</button>
+            <button class="sof-chip" data-val="Formal">Formal</button>
+            <button class="sof-chip" data-val="Beach">Beach</button>
+            <button class="sof-chip" data-val="Gym">Gym</button>
+            <button class="sof-chip" data-val="Travel">Travel</button>
+          </div>
+        </div>
+        <div class="sof-filter-row">
+          <div class="sof-group-label">Vibe</div>
+          <div class="sof-chip-group" id="sofVibe">
+            <button class="sof-chip active" data-val="">Any</button>
+            <button class="sof-chip" data-val="Clean Girl">Clean Girl</button>
+            <button class="sof-chip" data-val="Euro Summer">Euro Summer</button>
+            <button class="sof-chip" data-val="Quiet Luxury">Quiet Luxury</button>
+            <button class="sof-chip" data-val="Streetwear">Streetwear</button>
+            <button class="sof-chip" data-val="Boho">Boho</button>
+            <button class="sof-chip" data-val="Preppy">Preppy</button>
+            <button class="sof-chip" data-val="Dark Academia">Dark Academia</button>
+          </div>
+        </div>
+        <div class="sof-filter-row">
+          <div class="sof-group-label">Store</div>
+          <div class="sof-chip-group" id="sofStore">
+            <button class="sof-chip active" data-val="">All</button>
+            <button class="sof-chip" data-val="Shein">Shein</button>
+            <button class="sof-chip" data-val="Zara">Zara</button>
+            <button class="sof-chip" data-val="H&M">H&amp;M</button>
+            <button class="sof-chip" data-val="Aritzia">Aritzia</button>
+            <button class="sof-chip" data-val="Garage">Garage</button>
+          </div>
+        </div>
+        <button class="btn-primary sof-generate-btn" onclick="generateShopOutfits()">✨ Generate Outfits</button>
+      </div>
+
+      <div id="shopOutfitsGrid" class="shop-outfits-grid">
+        <div class="sof-empty" id="shopOutfitsEmpty">
+          <span class="sof-empty-icon">🛍️</span>
+          <p>Pick an occasion and vibe, then hit <strong>Generate Outfits</strong> to discover complete shoppable looks.</p>
+        </div>
+      </div>
+    </section>
+
     <section id="tab-match" class="tab">
       <div class="page-header">
         <h2>Match Check</h2>

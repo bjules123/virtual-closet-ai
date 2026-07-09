@@ -269,7 +269,8 @@ _VISION_PROMPT = """You are an expert clothing analyst. Examine this clothing im
 
 Be VERY precise about these details:
 
-GARMENT TYPE — look at the exact cut:
+GARMENT TYPE — look at the exact item:
+Tops:
 • Short sleeves ending above/at elbow → "t-shirt"
 • Long sleeves reaching the wrist → "long-sleeve"
 • No sleeves → "tank top"
@@ -277,10 +278,57 @@ GARMENT TYPE — look at the exact cut:
 • With hood → "hoodie"
 • Zip-up/button jacket → "jacket"
 • Longer outerwear → "coat"
+
+Bottoms / full:
 • One-piece dress → "dress"
 • Separate bottom flared/flowing → "skirt"
 • Full-length leg coverage → "pants" or "jeans" (if denim)
 • Knee-length or above leg coverage → "shorts"
+
+Shoes — pick the most specific match:
+• Running/athletic lace-up with rubber sole → "sneakers"
+• Y-strap between toes, open sole → "flip flops"
+• Open strappy warm-weather shoe (not flip flop) → "sandals"
+• Ankle-height boot → "ankle boots"
+• Knee-high or over-knee boot → "boots"
+• Chunky block heel or stiletto → "heels"
+• Pointed-toe elegant pump → "heels"
+• Slip-on with no heel, casual → "loafers"
+• Simple slim flat slip-on dress shoe → "flats"
+• Open backless slider/pool slide → "slides"
+• Formal lace-up Oxford/Derby → "oxford shoes"
+• Platform sole shoe → "platform shoes"
+• Any other shoe → "shoes"
+
+Accessories — pick the most specific match:
+• Waist/trouser strap with buckle → "belt"
+• Wide-brim floppy fabric hat (beach/sun) → "sun hat"
+• Rounded-top bucket-style hat → "bucket hat"
+• Cowboy/western hat with pinched crown → "cowboy hat"
+• Structured brim + flat top (fedora shape) → "fedora"
+• Soft beret / flat cap / newsboy cap → "beret" or "flat cap"
+• Knit stretchy winter hat → "beanie"
+• Baseball-style cap with curved brim → "baseball cap"
+• Any other hat with brim → "hat"
+• Lightweight neck wrap → "scarf"
+• Small flat hand-held bag with no strap → "clutch"
+• Small bag worn across the body on a long thin strap → "crossbody bag"
+• Bag hanging from one shoulder with a short strap → "shoulder bag"
+• Pouch worn around the waist / hips → "fanny pack"
+• Large cylindrical soft bag for travel/gym → "duffle bag"
+• Very small decorative bag → "mini bag"
+• Large open-top shopping/carry bag → "tote bag"
+• Bag with two straps worn on the back → "backpack"
+• Medium structured hand/arm bag → "handbag"
+• Generic carried bag → "bag"
+• Dark tinted lens eyewear → "sunglasses"
+• Clear lens eyewear → "glasses"
+• Wrist timepiece → "watch"
+• Chain/pendant around neck → "necklace"
+• Ear jewelry → "earrings"
+• Wrist chain/cuff → "bracelet"
+• Finger band → "ring"
+• General accessory → "accessory"
 
 COLOR — be specific:
 • Pure white = "white", off-white/cream = "cream"
@@ -303,7 +351,7 @@ PATTERN — be specific:
 
 Return ONLY this JSON, no other text:
 {
-  "type": <one of: t-shirt, long-sleeve, shirt, blouse, tank top, crop top, polo, hoodie, sweatshirt, sweater, cardigan, jacket, coat, vest, blazer, dress, skirt, pants, jeans, shorts, leggings, jumpsuit, overalls, other>,
+  "type": <one of: t-shirt, long-sleeve, shirt, blouse, tank top, crop top, polo, hoodie, sweatshirt, sweater, cardigan, jacket, coat, vest, blazer, dress, skirt, pants, jeans, shorts, leggings, jumpsuit, overalls, sneakers, flip flops, sandals, ankle boots, boots, heels, loafers, flats, slides, oxford shoes, platform shoes, shoes, belt, sun hat, bucket hat, cowboy hat, fedora, beret, flat cap, beanie, baseball cap, hat, scarf, clutch, crossbody bag, shoulder bag, fanny pack, duffle bag, mini bag, tote bag, backpack, handbag, bag, sunglasses, glasses, watch, necklace, earrings, bracelet, ring, accessory, other>,
   "color": <dominant color in plain English>,
   "color_hex": <hex code for dominant color, e.g. "#2e5fa3">,
   "colors": [<all significant colors as plain English strings, dominant first, up to 3>],
@@ -407,6 +455,27 @@ YOLOS_GARMENT_MAP = {
     "sweater":                  "sweater",
     "jumpsuit":                 "jumpsuit",
     "cape":                     "jacket",
+    # Shoes
+    "shoe":                     "shoes",
+    "boot":                     "boots",
+    "sandal":                   "sandals",
+    "sneaker":                  "sneakers",
+    "pump":                     "heels",
+    "heel":                     "heels",
+    "loafer":                   "loafers",
+    "slipper":                  "slides",
+    # Accessories
+    "belt":                     "belt",
+    "hat":                      "hat",
+    "cap":                      "cap",
+    "scarf":                    "scarf",
+    "bag, wallet":              "bag",
+    "backpack":                 "backpack",
+    "glasses":                  "sunglasses",
+    "glove":                    "accessory",
+    "watch":                    "watch",
+    "tie":                      "accessory",
+    "headband, head covering, hair accessory": "accessory",
 }
 
 
@@ -740,10 +809,13 @@ async def suggest(req: SuggestRequest) -> Dict[str, Any]:
     context = " | ".join(ctx_parts) if ctx_parts else "No specific context"
 
     sys_prompt = (
-        "You are a professional fashion stylist. Pick 2-4 items from the wardrobe that work "
-        "well together given the context below. Think about:\n"
-        "• Weather & temperature: suggest layers for cold/cool, light pieces for warm/hot, "
-        "  waterproof or cover-up items for rain\n"
+        "You are a professional fashion stylist. Pick 2-5 items from the wardrobe that work "
+        "well together given the context below. Build a complete outfit:\n"
+        "• Include a top + bottom (or full-body piece like a dress)\n"
+        "• Add a layer/jacket if weather is cold or cool\n"
+        "• Include shoes if any are available in the wardrobe\n"
+        "• Include one accessory (belt, bag, hat, etc.) if it completes the look\n"
+        "• Weather & temperature: layers for cold/cool, light pieces for warm/hot, waterproof for rain\n"
         "• Time of day: relaxed for morning, put-together for afternoon, elevated for evening/night\n"
         "• Occasion: match formality — casual for errands, polished for work, dressed-up for formal\n"
         "• Colour harmony: complementary or matching tones\n\n"
@@ -784,3 +856,461 @@ async def match(req: MatchRequest) -> Dict[str, Any]:
         return data
     except Exception as e:
         raise HTTPException(502, str(e))
+
+
+# ══════════════════════════════════════════════════════════════
+#  INSPO BOARD  (Pinterest proxy · AI analysis · outfit matching · shopping)
+# ══════════════════════════════════════════════════════════════
+
+def _extract_og_image(html: str) -> Optional[str]:
+    for pat in [
+        r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
+        r'"og:image"\s*:\s*"([^"]+)"',
+    ]:
+        m = re.search(pat, html)
+        if m:
+            return m.group(1).replace("&amp;", "&").replace("\\/", "/")
+    return None
+
+
+def _extract_board_images(html: str, max_images: int = 20) -> List[str]:
+    """Pull all 736x pin image URLs from Pinterest board page HTML."""
+    seen: set = set()
+    urls: List[str] = []
+    # Pinterest embeds image URLs both as-is and JSON-escaped (\/), so match both
+    for pat in [
+        r'https?:\\?/\\?/i\.pinimg\.com\\?/736x\\?/[^"\'>\s\\]+\.(?:jpg|jpeg|png|webp)',
+        r'https?:\\?/\\?/i\.pinimg\.com\\?/originals\\?/[^"\'>\s\\]+\.(?:jpg|jpeg|png|webp)',
+        r'https?:\\?/\\?/i\.pinimg\.com\\?/[^"\'>\s\\]+\.(?:jpg|jpeg|png|webp)',
+    ]:
+        for m in re.finditer(pat, html, re.IGNORECASE):
+            cleaned = m.group(0).replace("\\/", "/")
+            # Skip tiny thumbnails (60x, 30x)
+            if re.search(r'/(?:30x|60x|75x)/', cleaned):
+                continue
+            if cleaned not in seen:
+                seen.add(cleaned)
+                urls.append(cleaned)
+        if len(urls) >= max_images:
+            break
+    return urls[:max_images]
+
+
+async def _fetch_as_b64(client, image_url: str, ua: str) -> Optional[str]:
+    try:
+        r    = await client.get(image_url, headers={"User-Agent": ua})
+        ct   = r.headers.get("content-type", "")
+        mime = "image/png" if "png" in ct else "image/webp" if "webp" in ct else "image/jpeg"
+        return f"data:{mime};base64,{base64.b64encode(r.content).decode()}"
+    except Exception:
+        return None
+
+
+@app.get("/fetch-image", tags=["utility"])
+async def fetch_image(url: str):
+    """
+    Fetch images from a Pinterest URL.
+    - Single pin  → returns one image in the `images` list.
+    - Board / any other Pinterest page → returns all pin images found (up to 20).
+    Response: {"images": [{"image_b64": "data:image/jpeg;base64,..."}, ...]}
+    """
+    ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    req_headers = {
+        "User-Agent":      ua,
+        "Accept":          "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    try:
+        import httpx as _httpx
+        async with _httpx.AsyncClient(follow_redirects=True, timeout=20,
+                                      headers=req_headers) as client:
+            page = await client.get(url)
+        html = page.text
+
+        from urllib.parse import urlparse as _urlparse
+        is_single_pin = bool(re.search(r'/pin/\d+', _urlparse(url).path))
+
+        if is_single_pin:
+            image_url = _extract_og_image(html)
+            if not image_url:
+                raise HTTPException(404, "No image found for this pin")
+            async with _httpx.AsyncClient(follow_redirects=True, timeout=15) as client:
+                b64 = await _fetch_as_b64(client, image_url, ua)
+            if not b64:
+                raise HTTPException(502, "Could not download pin image")
+            return {"images": [{"image_b64": b64}]}
+
+        # Board / search / profile → extract all pin images
+        board_urls = _extract_board_images(html)
+
+        if not board_urls:
+            # Fallback: at least grab the og:image
+            og = _extract_og_image(html)
+            if og:
+                board_urls = [og]
+            else:
+                raise HTTPException(404, "No images found. Try a direct pin URL instead.")
+
+        results = []
+        async with _httpx.AsyncClient(follow_redirects=True, timeout=15) as client:
+            for img_url in board_urls:
+                b64 = await _fetch_as_b64(client, img_url, ua)
+                if b64:
+                    results.append({"image_b64": b64})
+
+        if not results:
+            raise HTTPException(502, "Found image URLs but could not download any")
+        return {"images": results}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, str(e))
+
+
+_INSPO_PROMPT = (
+    "Analyze this outfit inspiration image. Return JSON only:\n"
+    '{\n'
+    '  "vibe": "one short aesthetic label e.g. euro summer, quiet luxury, clean girl, streetwear, coastal grandmother, dark academia, boho, preppy",\n'
+    '  "pieces": ["piece 1", "piece 2", "piece 3"],\n'
+    '  "colors": ["color1", "color2", "color3"],\n'
+    '  "colors_hex": ["#hex1", "#hex2", "#hex3"],\n'
+    '  "style_notes": "one sentence describing the overall look"\n'
+    "}"
+)
+
+
+class InspoRequest(BaseModel):
+    image: str  # base64 data URL
+
+
+@app.post("/analyze-inspo", tags=["ai"])
+async def analyze_inspo(req: InspoRequest) -> Dict[str, Any]:
+    """Run Claude Sonnet vision on an inspo image to extract vibe, pieces, colors, and style notes."""
+    _require_ai()
+    b64, mime = req.image, "image/jpeg"
+    if "," in b64:
+        header, b64 = b64.split(",", 1)
+        if "png"  in header: mime = "image/png"
+        elif "webp" in header: mime = "image/webp"
+
+    if ANTHROPIC_AVAILABLE and _ant is not None:
+        try:
+            msg = await _ant.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=400,
+                messages=[{"role": "user", "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}},
+                    {"type": "text",  "text": _INSPO_PROMPT},
+                ]}],
+            )
+            return _extract_json(msg.content[0].text)
+        except Exception as e:
+            if not (OPENAI_AVAILABLE and _oai):
+                raise HTTPException(502, str(e))
+
+    if OPENAI_AVAILABLE and _oai is not None:
+        try:
+            r = await _oai.chat.completions.create(
+                model="gpt-4o-mini", temperature=0.1,
+                response_format={"type": "json_object"},
+                messages=[{"role": "user", "content": [
+                    {"type": "text",      "text": _INSPO_PROMPT},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}", "detail": "high"}},
+                ]}],
+                max_tokens=400,
+            )
+            return json.loads(r.choices[0].message.content)
+        except Exception as e:
+            raise HTTPException(502, str(e))
+
+    raise HTTPException(503, "No AI key set")
+
+
+class InspoAnalysis(BaseModel):
+    vibe:   str       = ""
+    pieces: List[str] = []
+    colors: List[str] = []
+
+
+class MatchInspoRequest(BaseModel):
+    inspo:       InspoAnalysis
+    closet:      List[Dict[str, Any]] = []
+    inspo_image: Optional[str] = None   # base64 data URL of the inspo photo
+
+
+_MATCH_INSPO_PROMPT = """\
+You are a brutally honest personal stylist reviewing someone's wardrobe against an outfit photo.
+Your job is to save them money — only tell them they own something if it is virtually identical \
+to what is in the photo. When in doubt, always recommend shopping.
+
+Study the photo carefully, then check the closet list below.
+
+━━━ THE ONE TEST THAT MATTERS ━━━
+Would a real stylist look at the closet item and the inspo piece and say
+"yes, wear what you have — it's the same thing"?
+  → YES → closet_item match
+  → NO, they'd say "you need to buy this specific thing" → gap + shop
+
+━━━ WHEN TO MATCH (all three must be true) ━━━
+  ✓ Same garment category (see aliases below)
+  ✓ Same shade — not just same base color (see shade rules below)
+  ✓ Same silhouette / sleeve length (see silhouette rules below)
+If ANY of the three differ → GAP → shop. No exceptions.
+
+━━━ GARMENT CATEGORY ALIASES ━━━
+These count as the same type:
+  • tank top = cami = spaghetti strap = sleeveless top
+  • t-shirt = tee = short-sleeve top (but NOT long-sleeve or sleeveless)
+  • sneakers = trainers = athletic shoes
+  • jeans = denim pants (but NOT leggings, trousers, or dress pants)
+  • boots = ankle boots (same height only)
+
+━━━ SHADE RULES (must be same shade, not just same color) ━━━
+  • Light blue ≠ dark blue ≠ bright blue ≠ navy
+  • Light wash denim ≠ medium wash ≠ dark wash denim
+  • White ≠ cream ≠ off-white
+  • Black ≠ charcoal ≠ dark gray
+  • Bright red ≠ burgundy ≠ wine
+  • Tan ≠ camel ≠ brown
+  Same shade = the two items could swap and no one would notice the color difference.
+
+━━━ SILHOUETTE RULES ━━━
+BOTTOMS — cut must match exactly:
+  • Wide leg ≠ straight ≠ skinny ≠ slim ≠ flare ≠ bootcut ≠ cargo ≠ baggy ≠ boyfriend
+  • Midi skirt ≠ mini skirt ≠ maxi skirt ≠ A-line ≠ pencil skirt
+
+TOPS — sleeve length must match exactly:
+  • Sleeveless / tank ≠ short sleeve (above elbow) ≠ long sleeve (wrist) ≠ crop (midriff)
+
+━━━ ALWAYS SHOP FOR THESE — NO MATCH POSSIBLE ━━━
+  • Statement pieces with distinctive details: fringe, corset boning, snake/animal print, \
+lace-up, cargo pockets, cutouts, ruching, tie-dye, sequins, sheer panels, structured boning, \
+embroidery, patchwork, distressing. A plain version of that garment is NOT a match.
+  • Matching sets: if the photo shows a co-ord / matching set (same fabric+print top+bottom), \
+the user must own the matching piece from that exact set. Having just one piece = gap for the other.
+
+━━━ BAGS & ACCESSORIES (looser rules) ━━━
+  • Match on color family + general type only.
+  • A tan shoulder bag matches any tan bag (crossbody, tote, etc.).
+  • Color shade flexibility allowed for accessories.
+
+Closet:
+{closet_lines}
+
+Return ONLY valid JSON — no commentary before or after:
+{{
+  "matches": [
+    {{
+      "piece": "<exact description of what you see in the photo>",
+      "closet_item": {{"type": "...", "color": "...", "index": <number>}} or null,
+      "gap_query": "<3-6 words: [shade] [silhouette] [garment type] ONLY. \
+Zero vibe/style/aesthetic words. Examples: 'dark wash baggy cargo jeans', \
+'grey midi skirt', 'white short sleeve fitted tee'. NOT 'grey skirt minimalist clean'>" or null
+    }}
+  ]
+}}
+Rules: closet_item=non-null means match found. gap_query=non-null means send to shopping. \
+Never set both non-null for the same piece. Never set both null.\
+"""
+
+
+@app.post("/match-inspo", tags=["ai"])
+async def match_inspo(req: MatchInspoRequest) -> Dict[str, Any]:
+    """Match each inspo outfit piece to a closet item or flag as a shopping gap using vision."""
+    _require_ai()
+
+    closet_lines = "\n".join(
+        f"  [{i['index']}] {i['color']} {i['type']}"
+        + (f" ({i['pattern']})" if i.get("pattern") else "")
+        for i in req.closet
+    )
+    prompt_text = _MATCH_INSPO_PROMPT.format(closet_lines=closet_lines)
+
+    try:
+        # ── Vision path: send the actual inspo photo so Claude sees exact colors/styles ──
+        if req.inspo_image and ANTHROPIC_AVAILABLE and _ant is not None:
+            b64, mime = req.inspo_image, "image/jpeg"
+            if "," in b64:
+                header, b64 = b64.split(",", 1)
+                if "png"  in header: mime = "image/png"
+                elif "webp" in header: mime = "image/webp"
+            msg = await _ant.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=1200,
+                messages=[{"role": "user", "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}},
+                    {"type": "text",  "text": prompt_text},
+                ]}],
+            )
+            return _extract_json(msg.content[0].text)
+
+        # ── Text-only fallback (no image or no Anthropic) ──
+        text_prompt = (
+            f"Outfit vibe: {req.inspo.vibe}\n"
+            f"Pieces: {', '.join(req.inspo.pieces)}\n"
+            f"Colors: {', '.join(req.inspo.colors)}\n\n"
+            + prompt_text
+        )
+
+        if ANTHROPIC_AVAILABLE and _ant is not None:
+            msg = await _ant.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=1200,
+                messages=[{"role": "user", "content": text_prompt}],
+            )
+            return _extract_json(msg.content[0].text)
+
+        if OPENAI_AVAILABLE and _oai is not None:
+            r = await _oai.chat.completions.create(
+                model="gpt-4o-mini",
+                temperature=0.2,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": "You are a fashion stylist. Return only valid JSON."},
+                    {"role": "user",   "content": text_prompt},
+                ],
+                max_tokens=1200,
+            )
+            return json.loads(r.choices[0].message.content)
+
+    except Exception as e:
+        raise HTTPException(502, str(e))
+
+    raise HTTPException(503, "No AI key set")
+
+
+class GenerateOutfitsRequest(BaseModel):
+    occasion: str = ""
+    vibe: str = ""
+    store: str = ""
+    closet: List[Dict] = []       # [{type, color, pattern}]
+    inspo_vibes: List[str] = []   # aesthetic labels from inspo board
+    inspo_colors: List[str] = []  # color names from inspo board
+
+
+_GENERATE_OUTFITS_PROMPT = """\
+You are a personal stylist generating shoppable outfit ideas for a specific person.
+
+THEIR WARDROBE (what they already own):
+{closet_section}
+
+THEIR STYLE AESTHETIC (from their inspo board):
+{inspo_section}
+
+FILTERS:
+Occasion: {occasion}
+Vibe filter: {vibe}
+{store_line}
+
+Generate 4 complete shoppable outfit ideas that feel authentic to THEIR personal style and \
+complement THEIR existing wardrobe colors and aesthetic. If they have a strong color palette \
+in their closet, build outfits around those colors. If their inspo board shows a clear aesthetic, \
+lean into it. Make the outfits feel like they were curated for this specific person, not generic.
+
+Return ONLY this JSON — no text before or after:
+{{
+  "outfits": [
+    {{
+      "name": "Short outfit name e.g. Sunday Market Look",
+      "vibe": "Aesthetic label e.g. Clean Girl",
+      "pieces": [
+        {{ "role": "Top",    "search_query": "white oversized linen button shirt" }},
+        {{ "role": "Bottom", "search_query": "wide leg beige linen trouser" }},
+        {{ "role": "Shoes",  "search_query": "brown leather loafer women" }},
+        {{ "role": "Bag",    "search_query": "tan leather tote bag" }}
+      ]
+    }}
+  ]
+}}
+
+Rules for search_query:
+- Format: [color/shade] [style adjective] [garment type]
+- Be specific enough to find real products on Google Shopping
+- NO brand names, NO aesthetic/vibe words ("clean girl", "minimalist", etc.)
+- Good examples: "dark wash straight leg jeans", "strappy black heeled sandal", "ribbed cream tank top"
+- Include 3-4 pieces per outfit (top, bottom, shoes, and optionally bag or accessory)
+- Make all 4 outfits distinct from each other in color palette and silhouette\
+"""
+
+
+@app.post("/generate-outfits", tags=["ai"])
+async def generate_outfits(req: GenerateOutfitsRequest) -> Dict[str, Any]:
+    """Use Claude to generate outfit concepts personalised to the user's closet + inspo board."""
+    _require_ai()
+
+    # ── Build closet section ──────────────────────────────────────────────────
+    if req.closet:
+        from collections import Counter
+        color_counts = Counter(i.get("color", "") for i in req.closet if i.get("color"))
+        top_colors   = [c for c, _ in color_counts.most_common(8)]
+        type_counts  = Counter(i.get("type",  "") for i in req.closet if i.get("type"))
+        top_types    = [t for t, _ in type_counts.most_common(10)]
+        closet_section = (
+            f"Color palette: {', '.join(top_colors)}\n"
+            f"Garment types owned: {', '.join(top_types)}"
+        )
+    else:
+        closet_section = "No closet data provided — generate outfits for any style."
+
+    # ── Build inspo section ───────────────────────────────────────────────────
+    inspo_parts = []
+    if req.inspo_vibes:
+        inspo_parts.append(f"Aesthetics they love: {', '.join(req.inspo_vibes[:8])}")
+    if req.inspo_colors:
+        inspo_parts.append(f"Colors they're drawn to: {', '.join(req.inspo_colors[:10])}")
+    inspo_section = "\n".join(inspo_parts) if inspo_parts else "No inspo board yet — use general fashion trends."
+
+    store_line = f"Preferred store: {req.store}" if req.store else "No store preference — suggest anything"
+    prompt = _GENERATE_OUTFITS_PROMPT.format(
+        closet_section=closet_section,
+        inspo_section=inspo_section,
+        occasion=req.occasion or "any occasion",
+        vibe=req.vibe or "any vibe (match their aesthetic)",
+        store_line=store_line,
+    )
+
+    try:
+        if ANTHROPIC_AVAILABLE and _ant is not None:
+            msg = await _ant.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=1400,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return _extract_json(msg.content[0].text)
+
+        if OPENAI_AVAILABLE and _oai is not None:
+            r = await _oai.chat.completions.create(
+                model="gpt-4o-mini",
+                temperature=0.8,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": "You are a fashion stylist. Return only valid JSON."},
+                    {"role": "user",   "content": prompt},
+                ],
+                max_tokens=1400,
+            )
+            return json.loads(r.choices[0].message.content)
+
+    except Exception as e:
+        raise HTTPException(502, str(e))
+
+    raise HTTPException(503, "No AI key set")
+
+
+@app.get("/shop", tags=["utility"])
+async def shop_proxy(q: str, key: str = ""):
+    """Proxy SerpAPI Google Shopping to avoid browser CORS restrictions."""
+    serp_key = key or os.environ.get("SERP_KEY", "")
+    if not serp_key:
+        return {"shopping_results": [], "error": "No SERP key"}
+    try:
+        import httpx as _httpx
+        search_url = f"https://serpapi.com/search.json?engine=google_shopping&q={q}&api_key={serp_key}&num=5"
+        async with _httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(search_url)
+            return r.json()
+    except Exception as e:
+        return {"shopping_results": [], "error": str(e)}

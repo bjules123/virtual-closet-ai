@@ -5,6 +5,13 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Load API keys from .env if it exists
+if [ -f "$SCRIPT_DIR/.env" ]; then
+  set -a
+  source "$SCRIPT_DIR/.env"
+  set +a
+fi
+
 # Kill any existing process on port 8000
 lsof -ti:8000 | xargs kill -9 2>/dev/null || true
 

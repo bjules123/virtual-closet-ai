@@ -9,9 +9,12 @@ const TOPS    = ["t-shirt","shirt","top","blouse","sweater","sweatshirt","hoodie
 const BOTTOMS = ["pants","jeans","shorts","skirt","leggings","trousers"];
 const LAYERS  = ["jacket","coat","cardigan","vest","blazer","windbreaker"];
 const FULL    = ["dress","jumpsuit","romper","overalls"];
+const SHOES   = ["sneaker","flip flop","sandal","ankle boot","boot","heel","loafer","flat","slide","mule","oxford","pump","clog","platform shoe","shoe","footwear"];
+const ACCESSORIES = ["belt","sun hat","bucket hat","cowboy hat","fedora","beret","flat cap","beanie","baseball cap","hat","cap","scarf","clutch","crossbody bag","shoulder bag","fanny pack","duffle bag","mini bag","tote bag","backpack","handbag","bag","purse","sunglasses","glasses","watch","necklace","earring","bracelet","ring","tie","glove","wallet","accessory"];
 
 /* ── State ── */
 let closetItems   = [];
+let inspoItems    = [];
 let currentFilter = "all";
 let currentView   = "grid";
 let editIndex     = -1;
@@ -23,6 +26,8 @@ let plannerData   = {};     // { "Mon": [{itemIdx}], ... }
 document.addEventListener("DOMContentLoaded", () => {
   loadFromStorage();
   initUploadZone();
+  initInspoUpload();
+  initShopOutfits();
   initSidebar();
   buildPlanner();
   refreshAll();
@@ -41,12 +46,23 @@ function loadFromStorage() {
   try {
     const raw = localStorage.getItem("vc_planner");
     plannerData = raw ? JSON.parse(raw) : {};
+    // Migrate old format: single item object → array
+    Object.keys(plannerData).forEach(day => {
+      if (plannerData[day] && !Array.isArray(plannerData[day])) {
+        plannerData[day] = [plannerData[day]];
+      }
+    });
   } catch { plannerData = {}; }
 
   try {
     const raw = localStorage.getItem("vc_history");
     outfitHistory = raw ? JSON.parse(raw) : [];
   } catch { outfitHistory = []; }
+
+  try {
+    const raw = localStorage.getItem("vc_inspo");
+    inspoItems = raw ? JSON.parse(raw) : [];
+  } catch { inspoItems = []; }
 }
 
 function saveCloset() {
@@ -583,12 +599,14 @@ function refreshClosetView() {
 function itemMatchesFilter(item) {
   const t = (item.type || "").toLowerCase();
   switch (currentFilter) {
-    case "tops":     return TOPS.some(k => t.includes(k));
-    case "bottoms":  return BOTTOMS.some(k => t.includes(k));
-    case "jackets":  return LAYERS.some(k => t.includes(k));
-    case "dresses":  return FULL.some(k => t.includes(k));
-    case "other":    return ![...TOPS,...BOTTOMS,...LAYERS,...FULL].some(k => t.includes(k));
-    default:         return true;
+    case "tops":        return TOPS.some(k => t.includes(k));
+    case "bottoms":     return BOTTOMS.some(k => t.includes(k));
+    case "jackets":     return LAYERS.some(k => t.includes(k));
+    case "dresses":     return FULL.some(k => t.includes(k));
+    case "shoes":       return SHOES.some(k => t.includes(k));
+    case "accessories": return ACCESSORIES.some(k => t.includes(k));
+    case "other":       return ![...TOPS,...BOTTOMS,...LAYERS,...FULL,...SHOES,...ACCESSORIES].some(k => t.includes(k));
+    default:            return true;
   }
 }
 
@@ -745,12 +763,15 @@ function resetCloset() {
   closetItems  = [];
   plannerData  = {};
   outfitHistory = [];
+  inspoItems   = [];
   localStorage.removeItem("vc_closet");
   localStorage.removeItem("vc_planner");
   localStorage.removeItem("vc_history");
+  localStorage.removeItem("vc_inspo");
   refreshAll();
   renderPlanner();
   renderOutfitHistory();
+  renderInspoBoard();
   showToast("Closet cleared");
 }
 
@@ -897,87 +918,122 @@ const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 function buildPlanner() {
   const grid = document.getElementById("plannerGrid");
   if (!grid) return;
-
   const todayIdx = (new Date().getDay() + 6) % 7; // Mon=0
 
-  grid.innerHTML = DAYS.map((day, i) => `
-    <div class="planner-day${i === todayIdx ? " today" : ""}" id="planner-${day}">
-      <div class="planner-day-label">${day}${i === todayIdx ? " · Today" : ""}</div>
-      <div class="planner-slot${plannerData[day] ? " filled" : ""}"
-           id="slot-${day}"
-           onclick="openPlannerPicker('${day}')"
-           title="Click to assign an outfit">
-        ${plannerData[day]
-          ? `<img src="${plannerData[day].image}" alt="${escHtml(plannerData[day].type)}" />`
-          : "＋ Add outfit"}
-      </div>
-    </div>
-  `).join("");
+  grid.innerHTML = DAYS.map((day, i) => {
+    const items = plannerData[day] || [];
+    const hasItems = items.length > 0;
+    const thumbsHtml = items.map((item, ii) => `
+      <div class="pd-thumb" title="${escHtml(item.type)} · ${escHtml(item.color)}">
+        <img src="${item.image}" alt="${escHtml(item.type)}" />
+        <button class="pd-remove-btn"
+                onclick="removePlannerItem('${day}',${ii});event.stopPropagation()"
+                title="Remove">✕</button>
+      </div>`).join("");
+
+    return `
+      <div class="planner-day${i === todayIdx ? " today" : ""}" id="planner-${day}">
+        <div class="planner-day-label">${day}${i === todayIdx ? " · Today" : ""}</div>
+        ${hasItems ? `<div class="pd-thumbs">${thumbsHtml}</div>` : ""}
+        ${hasItems
+          ? `<div class="pd-foot">
+               <button class="pd-add-btn-sm" onclick="openPlannerPicker('${day}')">＋ Add</button>
+               <button class="pd-clear-btn" onclick="clearPlannerDay('${day}')">Clear</button>
+             </div>`
+          : `<button class="pd-add-btn" onclick="openPlannerPicker('${day}')">＋ Add outfit</button>`}
+      </div>`;
+  }).join("");
 }
 
 function renderPlanner() { buildPlanner(); }
 
-function openPlannerPicker(day) {
-  if (closetItems.length === 0) {
-    showToast("Add some items to your closet first.");
-    return;
-  }
+function _ppThumbs(day) {
+  const current = plannerData[day] || [];
+  const currentImages = new Set(current.map(p => p.image));
+  return closetItems.map((item, idx) => {
+    const added = currentImages.has(item.image);
+    return `
+      <div class="pp-item${added ? " pp-added" : ""}"
+           onclick="assignToPlanner('${day}',${idx})"
+           title="${added ? "Remove from outfit" : "Add to outfit"}">
+        <img src="${item.image}" alt="${escHtml(item.type)}" />
+        ${added ? `<div class="pp-check">✓</div>` : ""}
+        <div class="pp-label">${escHtml(item.type)}</div>
+      </div>`;
+  }).join("");
+}
 
-  /* Simple prompt-free picker: show a mini modal with item thumbnails */
+function _ppFooter(day) {
+  const count = (plannerData[day] || []).length;
+  return count > 0
+    ? `<div style="padding:12px 20px;border-top:1px solid #e4e4e7;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+         <span style="font-size:.8rem;color:#71717a;">${count} item${count !== 1 ? "s" : ""} in outfit</span>
+         <button onclick="clearPlannerDay('${day}')"
+           style="background:#fff1f2;color:#f43f5e;border:1.5px solid #fecdd3;border-radius:8px;
+                  padding:6px 14px;font-size:.78rem;font-weight:600;cursor:pointer;">
+           Clear day
+         </button>
+       </div>`
+    : "";
+}
+
+function openPlannerPicker(day) {
+  if (closetItems.length === 0) { showToast("Add some items to your closet first."); return; }
   const existing = document.getElementById("plannerPickerModal");
   if (existing) existing.remove();
 
   const modal = document.createElement("div");
   modal.id = "plannerPickerModal";
-  modal.style.cssText = `
-    position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:600;
-    display:flex;align-items:center;justify-content:center;padding:16px;
-  `;
-
-  const thumbs = closetItems.map((item, idx) => `
-    <div onclick="assignToPlanner('${day}', ${idx})"
-         style="cursor:pointer;border-radius:10px;overflow:hidden;border:2px solid transparent;
-                transition:.15s;flex-shrink:0;width:90px;"
-         onmouseover="this.style.borderColor='#a855f7'"
-         onmouseout="this.style.borderColor='transparent'">
-      <img src="${item.image}" style="width:90px;height:110px;object-fit:cover;display:block;" alt="${escHtml(item.type)}" />
-      <div style="font-size:.68rem;padding:3px 4px;text-align:center;color:#3f3f46;font-weight:600;">
-        ${escHtml(item.type)}
-      </div>
-    </div>`
-  ).join("");
+  modal.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:600;
+    display:flex;align-items:center;justify-content:center;padding:16px;`;
 
   modal.innerHTML = `
-    <div style="background:#fff;border-radius:18px;max-width:520px;width:100%;max-height:80vh;
+    <div style="background:#fff;border-radius:18px;max-width:560px;width:100%;max-height:82vh;
                 overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.15);">
       <div style="padding:18px 20px;border-bottom:1px solid #e4e4e7;display:flex;
                   justify-content:space-between;align-items:center;">
-        <strong style="font-size:.95rem;">Pick outfit for ${day}</strong>
+        <div>
+          <strong style="font-size:.95rem;">Build outfit for ${day}</strong>
+          <div style="font-size:.75rem;color:#71717a;margin-top:2px;">Tap to add or remove each piece</div>
+        </div>
         <button onclick="document.getElementById('plannerPickerModal').remove()"
-                style="background:none;border:none;font-size:1.1rem;cursor:pointer;color:#71717a;">✕</button>
+                style="background:none;border:none;font-size:1.1rem;cursor:pointer;color:#71717a;padding:4px;">✕</button>
       </div>
-      <div style="padding:16px;overflow-y:auto;display:flex;flex-wrap:wrap;gap:10px;justify-content:center;">
-        ${thumbs}
+      <div id="ppContent" style="padding:16px;overflow-y:auto;display:flex;flex-wrap:wrap;gap:10px;justify-content:center;">
+        ${_ppThumbs(day)}
       </div>
-      ${plannerData[day] ? `<div style="padding:12px 20px;border-top:1px solid #e4e4e7;text-align:center;">
-        <button onclick="clearPlannerDay('${day}')"
-          style="background:#fff1f2;color:#f43f5e;border:1.5px solid #fecdd3;border-radius:8px;
-                 padding:7px 16px;font-size:.8rem;font-weight:600;cursor:pointer;">
-          🗑 Clear ${day}
-        </button>
-      </div>` : ""}
+      <div id="ppFooter">${_ppFooter(day)}</div>
     </div>`;
 
   modal.addEventListener("click", e => { if (e.target === modal) modal.remove(); });
   document.body.appendChild(modal);
 }
 
-function assignToPlanner(day, idx) {
-  plannerData[day] = closetItems[idx];
+function assignToPlanner(day, closetIdx) {
+  if (!plannerData[day]) plannerData[day] = [];
+  const item = closetItems[closetIdx];
+  const existingIdx = plannerData[day].findIndex(p => p.image === item.image);
+  if (existingIdx !== -1) {
+    plannerData[day].splice(existingIdx, 1);
+  } else {
+    plannerData[day].push({ ...item });
+  }
+  if (plannerData[day].length === 0) delete plannerData[day];
   savePlanner();
-  document.getElementById("plannerPickerModal")?.remove();
   buildPlanner();
-  showToast(`${closetItems[idx]?.type} planned for ${day} ✓`);
+  // Update modal in place
+  const ppContent = document.getElementById("ppContent");
+  if (ppContent) ppContent.innerHTML = _ppThumbs(day);
+  const ppFooter  = document.getElementById("ppFooter");
+  if (ppFooter)  ppFooter.innerHTML  = _ppFooter(day);
+}
+
+function removePlannerItem(day, thumbIdx) {
+  if (!plannerData[day]) return;
+  plannerData[day].splice(thumbIdx, 1);
+  if (plannerData[day].length === 0) delete plannerData[day];
+  savePlanner();
+  buildPlanner();
 }
 
 function clearPlannerDay(day) {
@@ -1040,19 +1096,17 @@ document.addEventListener("keydown", e => {
 });
 
 /* ============================================================
-   STYLE DNA
+   STYLE PROFILE
    ============================================================ */
 function updateStyleDna() {
   const dna = document.getElementById("styleDna");
   if (!dna) return;
-
-  if (closetItems.length < 5) {
-    dna.style.display = "none";
-    return;
-  }
+  if (closetItems.length < 5) { dna.style.display = "none"; return; }
   dna.style.display = "";
 
-  // ── Color frequency map ──
+  const total = closetItems.length;
+
+  // ── Color data ──────────────────────────────────────────────
   const colorCounts = {};
   const colorHexMap = {};
   closetItems.forEach(item => {
@@ -1060,74 +1114,170 @@ function updateStyleDna() {
     colorCounts[c] = (colorCounts[c] || 0) + 1;
     if (!colorHexMap[c]) colorHexMap[c] = item.color_hex || "#ccc";
   });
+  const topColors = Object.entries(colorCounts).sort((a, b) => b[1] - a[1]).slice(0, 7);
 
-  const topColors = Object.entries(colorCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 6);
-
-  const swatchWrap = document.getElementById("dnaSwatches");
-  if (swatchWrap) {
-    swatchWrap.innerHTML = topColors.map(([name]) => `
-      <div class="dna-swatch-wrap">
-        <div class="dna-swatch" style="background:${colorHexMap[name]}"></div>
-        <span class="dna-swatch-name">${escHtml(name)}</span>
-      </div>`).join("");
-  }
-
-  // ── Wardrobe breakdown ──
-  const total   = closetItems.length;
+  // ── Category data ────────────────────────────────────────────
   const cats = [
-    { label: "Tops",    items: closetItems.filter(i => TOPS.some(k    => (i.type||"").toLowerCase().includes(k))) },
-    { label: "Bottoms", items: closetItems.filter(i => BOTTOMS.some(k => (i.type||"").toLowerCase().includes(k))) },
-    { label: "Layers",  items: closetItems.filter(i => LAYERS.some(k  => (i.type||"").toLowerCase().includes(k))) },
-    { label: "Dresses", items: closetItems.filter(i => FULL.some(k    => (i.type||"").toLowerCase().includes(k))) },
+    { label: "tops",        items: closetItems.filter(i => TOPS.some(k        => (i.type||"").toLowerCase().includes(k))) },
+    { label: "bottoms",     items: closetItems.filter(i => BOTTOMS.some(k     => (i.type||"").toLowerCase().includes(k))) },
+    { label: "layers",      items: closetItems.filter(i => LAYERS.some(k      => (i.type||"").toLowerCase().includes(k))) },
+    { label: "dresses",     items: closetItems.filter(i => FULL.some(k        => (i.type||"").toLowerCase().includes(k))) },
+    { label: "shoes",       items: closetItems.filter(i => SHOES.some(k       => (i.type||"").toLowerCase().includes(k))) },
+    { label: "accessories", items: closetItems.filter(i => ACCESSORIES.some(k => (i.type||"").toLowerCase().includes(k))) },
   ];
+  const biggestCat = [...cats].sort((a, b) => b.items.length - a.items.length)[0];
 
-  const breakdown = document.getElementById("dnaBreakdown");
-  if (breakdown) {
-    breakdown.innerHTML = cats.map(({ label, items }) => {
-      const pct = total > 0 ? Math.round((items.length / total) * 100) : 0;
-      return `
-        <div class="dna-bar-row">
-          <span class="dna-bar-label">${label}</span>
-          <div class="dna-bar-track">
-            <div class="dna-bar-fill" style="width:${pct}%"></div>
-          </div>
-          <span class="dna-bar-pct">${pct}%</span>
-        </div>`;
-    }).join("");
+  // ── Personality signal ───────────────────────────────────────
+  const NEUTRALS = ["black","white","gray","grey","beige","cream","navy","tan","brown","ivory","stone","sand","camel","charcoal","off-white"];
+  const BOLDS    = ["red","orange","yellow","pink","purple","cobalt","lime","magenta","teal","coral","turquoise","fuchsia","electric","neon"];
+  const neutralPct = Object.entries(colorCounts)
+    .filter(([c]) => NEUTRALS.some(n => c.includes(n)))
+    .reduce((s, [, n]) => s + n, 0) / Math.max(1, total);
+  const boldPct = Object.entries(colorCounts)
+    .filter(([c]) => BOLDS.some(b => c.includes(b)))
+    .reduce((s, [, n]) => s + n, 0) / Math.max(1, total);
+
+  let personality = "versatile";
+  if (neutralPct > 0.65) personality = "minimalist";
+  else if (boldPct > 0.5) personality = "maximalist";
+  else if ((cats.find(c => c.label === "layers")?.items.length || 0) / total > 0.3) personality = "streetwear";
+  else if ((cats.find(c => c.label === "dresses")?.items.length || 0) / total > 0.3) personality = "romantic";
+  else if (boldPct > 0.25 && neutralPct > 0.3) personality = "eclectic";
+
+  // ── Inspo data ───────────────────────────────────────────────
+  let inspoAesthetic = "";
+  let sigColorNames  = [];
+  let wishColorNames = [];
+  const inspoColorHexMap = {};
+
+  if (inspoItems.length > 0) {
+    const vibeCounts = {};
+    inspoItems.forEach(i => { if (i.vibe) vibeCounts[i.vibe] = (vibeCounts[i.vibe] || 0) + 1; });
+    inspoAesthetic = Object.entries(vibeCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+
+    const inspoColorSet = new Set();
+    inspoItems.forEach(item => {
+      (item.colors || []).forEach((c, ci) => {
+        const key = c.toLowerCase().trim();
+        inspoColorSet.add(key);
+        if (!inspoColorHexMap[key] && item.colors_hex?.[ci]) inspoColorHexMap[key] = item.colors_hex[ci];
+      });
+    });
+    const closetColorSet = new Set(closetItems.map(i => (i.color || "").toLowerCase().trim()));
+    sigColorNames  = [...inspoColorSet].filter(c => closetColorSet.has(c)).slice(0, 3);
+    wishColorNames = [...inspoColorSet].filter(c => !closetColorSet.has(c)).slice(0, 3);
   }
 
-  // ── Personality label ──
-  const personality = derivePersonality(colorCounts, cats);
-  const label = document.getElementById("dnaPersonality");
-  if (label) label.textContent = personality;
+  // ── Deterministic phrase index (stable for a given closet size) ──
+  const phraseIdx = total % 3;
+
+  // ── Render headline ──────────────────────────────────────────
+  const headlineEl = document.getElementById("sdnaHeadline");
+  if (headlineEl) headlineEl.innerHTML = _sdnaHeadline(personality, inspoAesthetic, phraseIdx);
+
+  // ── Render paragraph ─────────────────────────────────────────
+  const paraEl = document.getElementById("sdnaPara");
+  if (paraEl) paraEl.textContent = _sdnaPara(personality, topColors, cats, total, neutralPct, phraseIdx);
+
+  // ── Render color strip ───────────────────────────────────────
+  const colorsEl = document.getElementById("sdnaColors");
+  if (colorsEl) {
+    colorsEl.innerHTML = topColors.map(([name]) =>
+      `<span class="sdna-swatch" style="background:${colorHexMap[name] || '#ccc'}" title="${escHtml(name)}"></span>`
+    ).join("");
+  }
+
+  // ── Render inspo line ────────────────────────────────────────
+  const inspoLineEl = document.getElementById("sdnaInspoLine");
+  if (inspoLineEl) {
+    if (inspoItems.length > 0 && inspoAesthetic) {
+      inspoLineEl.textContent = _sdnaInspoLine(inspoAesthetic, sigColorNames, wishColorNames);
+      inspoLineEl.style.display = "";
+    } else {
+      inspoLineEl.style.display = "none";
+    }
+  }
 }
 
-function derivePersonality(colorCounts, cats) {
-  const neutrals  = ["black","white","gray","grey","beige","cream","navy","tan","brown"];
-  const bolds     = ["red","orange","yellow","pink","purple","green","cobalt","lime","magenta"];
-  const total     = closetItems.length;
+function _sdnaHeadline(personality, inspoAesthetic, idx) {
+  const byAesthetic = {
+    "Clean Girl":      ["Clean lines, effortless execution.", "You make getting dressed look easy.", "Clean Girl through and through."],
+    "Quiet Luxury":    ["Quiet luxury isn't a trend for you — it's the baseline.", "You spend where it counts and it shows.", "Understated. Intentional. Always right."],
+    "Streetwear":      ["Your style has an edge and knows how to use it.", "Casual but deliberate. Effortless but considered.", "You dress for yourself. It works."],
+    "Euro Summer":     ["Your wardrobe has a passport.", "Sun-washed, easy, and always put together.", "Effortless in the way that actually takes thought."],
+    "Boho":            ["Free-spirited with a serious eye for texture.", "Your style is layered — literally and figuratively.", "You wear what feels right. It always does."],
+    "Dark Academia":   ["You dress like you have a library card and actually use it.", "Thoughtful, intentional, deeply stylish.", "Dark Academia as a lifestyle, not just an aesthetic."],
+    "Preppy":          ["Classic with a clear point of view.", "Polished, put-together, and never overdone.", "You dress like you mean it."],
+  };
+  const byPersonality = {
+    minimalist:  ["You dress in whispers, not shouts.", "Less, but better — that's your whole thing.", "Your wardrobe is edited to perfection."],
+    maximalist:  ["You dress to be noticed. And you are.", "Bold palettes, confident choices. Your closet has a personality.", "Your wardrobe doesn't do quiet — and that's the point."],
+    streetwear:  ["Casual but considered. Your style walks the line perfectly.", "You dress for yourself, not for the occasion.", "Comfort and cool, in equal measure."],
+    romantic:    ["Soft silhouettes, intentional choices.", "You lean into your aesthetic and own it completely.", "Feminine and considered — your wardrobe says it before you do."],
+    eclectic:    ["You're hard to pin down, which is exactly the point.", "A little bold, a little quiet — always interesting.", "Your style doesn't pick a lane. It doesn't need to."],
+    versatile:   ["Your wardrobe keeps its options open.", "Adaptable and considered. You dress for the moment.", "Your closet can do anything you ask of it."],
+  };
 
-  const neutralPct = Object.entries(colorCounts)
-    .filter(([c]) => neutrals.some(n => c.includes(n)))
-    .reduce((s, [, n]) => s + n, 0) / Math.max(1, total);
+  const pool = (inspoAesthetic && byAesthetic[inspoAesthetic]) || byPersonality[personality] || byPersonality.versatile;
+  return pool[idx % pool.length];
+}
 
-  const boldPct = Object.entries(colorCounts)
-    .filter(([c]) => bolds.some(b => c.includes(b)))
-    .reduce((s, [, n]) => s + n, 0) / Math.max(1, total);
+function _sdnaPara(personality, topColors, cats, total, neutralPct, idx) {
+  const colorNames = topColors.slice(0, 3).map(([name]) => name);
+  const colorStr = colorNames.length >= 3
+    ? `${colorNames[0]}, ${colorNames[1]}, and ${colorNames[2]}`
+    : colorNames.join(" and ");
 
-  const layerCount  = cats.find(c => c.label === "Layers")?.items.length  || 0;
-  const dressCount  = cats.find(c => c.label === "Dresses")?.items.length || 0;
-  const bottomCount = cats.find(c => c.label === "Bottoms")?.items.length || 0;
+  const topsCount    = cats.find(c => c.label === "tops")?.items.length    || 0;
+  const bottomsCount = cats.find(c => c.label === "bottoms")?.items.length || 0;
+  const layerCount   = cats.find(c => c.label === "layers")?.items.length  || 0;
+  const dressCount   = cats.find(c => c.label === "dresses")?.items.length || 0;
 
-  if (neutralPct > 0.65)                          return "Minimalist";
-  if (boldPct > 0.5)                              return "Maximalist";
-  if (layerCount / Math.max(1, total) > 0.3)      return "Streetwear";
-  if (dressCount / Math.max(1, total) > 0.3)      return "Feminine";
-  if (bottomCount / Math.max(1, total) > 0.5)     return "Classic";
-  if (boldPct > 0.25 && neutralPct > 0.3)         return "Eclectic";
-  return "Versatile";
+  // Color opening
+  let colorLine = "";
+  if (neutralPct > 0.65) {
+    colorLine = `You gravitate toward neutrals — ${colorStr} form the foundation of almost everything you own.`;
+  } else if (neutralPct > 0.4) {
+    colorLine = `Your palette is anchored in neutrals — ${colorStr} — with a little room to experiment.`;
+  } else {
+    colorLine = `Your color palette is confident: ${colorStr} show up most in your closet.`;
+  }
+
+  // Category observation
+  let catLine = "";
+  if (topsCount > 0 && bottomsCount > 0 && topsCount > bottomsCount * 1.7) {
+    catLine = `Your closet skews heavily toward tops, which means you probably have a few go-to bottoms you rely on more than you'd like. Adding more variety down below would multiply your outfit options instantly.`;
+  } else if (bottomsCount > 0 && topsCount > 0 && bottomsCount > topsCount * 1.7) {
+    catLine = `You have a strong bottom selection — now imagine what a few more interesting tops could unlock for you.`;
+  } else if (layerCount / total > 0.3) {
+    catLine = `You love a layer — your outerwear game is clearly a priority. That kind of intentional layering is what makes an outfit feel finished.`;
+  } else if (dressCount / total > 0.3) {
+    catLine = `One-and-done dressing is clearly your move. It's efficient, it's easy, and it always looks intentional.`;
+  } else {
+    const balancedLines = [
+      `Your wardrobe is well-balanced — you've got a solid mix across categories, which means more flexibility when you actually need to get dressed.`,
+      `You've built a wardrobe that can do most things. That kind of range is harder to achieve than it looks.`,
+      `There's a good spread here. The kind of closet where you can actually get dressed in the morning without a crisis.`,
+    ];
+    catLine = balancedLines[idx % balancedLines.length];
+  }
+
+  return `${colorLine} ${catLine}`;
+}
+
+function _sdnaInspoLine(aesthetic, sigColors, wishColors) {
+  let line = `Your inspo board leans ${aesthetic}.`;
+  if (sigColors.length > 0) {
+    const sig = sigColors.slice(0, 2).join(" and ");
+    line += ` You already own the ${sig} — those colors are working for you.`;
+  }
+  if (wishColors.length > 0) {
+    const wish = wishColors.slice(0, 2).join(" and ");
+    line += ` You're still reaching for ${wish}.`;
+  } else if (sigColors.length === 0) {
+    line += ` Keep building toward it.`;
+  }
+  return line;
 }
 
 /* ============================================================
@@ -1468,9 +1618,629 @@ refreshAll = function () {
   updateStyleDna();
 };
 
-// Patch showTab to handle match tab + weather
+/* ============================================================
+   INSPO BOARD
+   ============================================================ */
+
+const INSPO_STORES = ["", "Shein", "Zara", "H&M", "Aritzia", "Garage"];
+let _buildMatches = [];   // current set of matches for store switching
+
+function saveInspo() {
+  try {
+    localStorage.setItem("vc_inspo", JSON.stringify(inspoItems));
+  } catch (e) {
+    if (e.name === "QuotaExceededError") showToast("⚠️ Storage full — remove some inspo items.");
+  }
+}
+
+/* ── Upload zone ── */
+function initInspoUpload() {
+  const zone  = document.getElementById("inspoUploadZone");
+  const input = document.getElementById("inspoUpload");
+  if (!zone || !input) return;
+
+  zone.addEventListener("click", () => input.click());
+  zone.addEventListener("dragover",  e => { e.preventDefault(); e.stopPropagation(); zone.classList.add("drag-over"); });
+  zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
+  zone.addEventListener("drop", e => {
+    e.preventDefault(); e.stopPropagation();
+    zone.classList.remove("drag-over");
+    const file = [...(e.dataTransfer?.files || [])].find(f => f.type.startsWith("image/"));
+    if (file) _handleInspoFile(file);
+  });
+  input.addEventListener("change", () => {
+    const file = input.files?.[0];
+    if (file) _handleInspoFile(file);
+    input.value = "";
+  });
+}
+
+async function _handleInspoFile(file) {
+  const raw        = await readFileAsDataURL(file);
+  const compressed = await compressImage(raw);
+  await _processInspoImage(compressed, "upload");
+}
+
+/* ── Pinterest import ── */
+async function importPinterestUrl() {
+  const input  = document.getElementById("inspoUrlInput");
+  const status = document.getElementById("inspoUrlStatus");
+  const url    = (input.value || "").trim();
+  if (!url) { showToast("Paste a Pinterest URL first."); return; }
+
+  status.style.display = "";
+  status.className     = "inspo-url-status loading";
+  status.textContent   = "Fetching images from Pinterest…";
+
+  try {
+    const res = await fetch(`${BACKEND}/fetch-image?url=${encodeURIComponent(url)}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Server error ${res.status}`);
+    }
+    const data   = await res.json();
+    const images = data.images || [];
+    if (!images.length) throw new Error("No images found");
+
+    const total = images.length;
+    for (let i = 0; i < total; i++) {
+      status.textContent = total > 1
+        ? `Analyzing ${i + 1} of ${total}…`
+        : "Analyzing…";
+      const compressed = await compressImage(images[i].image_b64);
+      await _processInspoImage(compressed, "pinterest", url, { quiet: true });
+    }
+
+    input.value          = "";
+    status.style.display = "none";
+    renderInspoBoard();
+    updateStyleDna();
+    showToast(`Added ${total} inspo image${total !== 1 ? "s" : ""} ✓`);
+  } catch (err) {
+    status.textContent = `Error: ${err.message}`;
+    status.className   = "inspo-url-status error";
+  }
+}
+
+/* ── AI analysis ── */
+// quiet:true suppresses spinner/toast so the caller can batch-manage UI
+async function _processInspoImage(base64, source, url = "", { quiet = false } = {}) {
+  const spinner = document.getElementById("inspoAnalyzing");
+  if (!quiet && spinner) spinner.style.display = "flex";
+
+  try {
+    const res = await fetch(`${BACKEND}/analyze-inspo`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ image: base64 }),
+    });
+    if (!res.ok) throw new Error(`Analysis failed (${res.status})`);
+    const analysis = await res.json();
+
+    inspoItems.unshift({
+      id:          Date.now(),
+      image:       base64,
+      source,
+      url,
+      vibe:        analysis.vibe        || "style inspo",
+      pieces:      analysis.pieces      || [],
+      colors:      analysis.colors      || [],
+      colors_hex:  analysis.colors_hex  || [],
+      style_notes: analysis.style_notes || "",
+      addedAt:     Date.now(),
+    });
+    saveInspo();
+    if (!quiet) { renderInspoBoard(); updateStyleDna(); showToast("Inspo added ✓"); }
+  } catch (err) {
+    if (!quiet) showToast(`Could not analyze image: ${err.message}`);
+    else console.warn("[inspo] analyze failed:", err.message);
+  } finally {
+    if (!quiet && spinner) spinner.style.display = "none";
+  }
+}
+
+/* ── Render board ── */
+function renderInspoBoard() {
+  const grid  = document.getElementById("inspoGrid");
+  const empty = document.getElementById("inspoEmpty");
+  if (!grid) return;
+
+  if (inspoItems.length === 0) {
+    grid.innerHTML = "";
+    if (empty) empty.style.display = "";
+    return;
+  }
+  if (empty) empty.style.display = "none";
+
+  grid.innerHTML = inspoItems.map((item, idx) => {
+    const swatches = (item.colors_hex || []).slice(0, 5).map(h =>
+      `<span class="inspo-color-swatch" style="background:${h}"></span>`
+    ).join("");
+    return `
+      <div class="inspo-card">
+        <div class="inspo-img-wrap">
+          <img src="${item.image}" alt="${escHtml(item.vibe)}" loading="lazy" />
+          <span class="inspo-vibe-badge">${escHtml(item.vibe)}</span>
+        </div>
+        <div class="inspo-card-body">
+          ${swatches ? `<div class="inspo-palette">${swatches}</div>` : ""}
+          ${item.style_notes ? `<p class="inspo-notes">${escHtml(item.style_notes)}</p>` : ""}
+          <div class="inspo-actions">
+            <button class="btn-primary inspo-build-btn" onclick="buildThisOutfit(${idx})">✨ Build This Outfit</button>
+            <button class="inspo-remove-btn" onclick="removeInspo(${idx})" title="Remove">🗑</button>
+          </div>
+        </div>
+      </div>`;
+  }).join("");
+}
+
+function removeInspo(idx) {
+  inspoItems.splice(idx, 1);
+  saveInspo();
+  renderInspoBoard();
+  updateStyleDna();
+  showToast("Removed from inspo board");
+}
+
+/* ── Build This Outfit ── */
+async function buildThisOutfit(idx) {
+  const inspo = inspoItems[idx];
+  if (!inspo) return;
+
+  // Create and show modal
+  const modal = document.createElement("div");
+  modal.id        = "buildOutfitModal";
+  modal.className = "build-modal-overlay";
+  modal.innerHTML = `
+    <div class="build-modal">
+      <div class="build-modal-top">
+        <button class="build-modal-close" onclick="document.getElementById('buildOutfitModal').remove()">✕</button>
+      </div>
+      <div class="build-modal-header">
+        <img src="${inspo.image}" class="build-inspo-thumb" alt="inspo" />
+        <div class="build-header-info">
+          <span class="inspo-vibe-badge" style="position:static;margin-bottom:8px;display:inline-block">${escHtml(inspo.vibe)}</span>
+          <p class="build-notes">${escHtml(inspo.style_notes || "")}</p>
+        </div>
+      </div>
+      <div class="build-modal-content">
+        <div class="ai-thinking" id="buildThinking" style="display:flex;margin:8px 0 24px">
+          <div class="ai-spinner"></div>
+          <span>Finding matches in your closet…</span>
+        </div>
+      </div>
+    </div>`;
+  modal.addEventListener("click", e => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
+
+  if (closetItems.length === 0) {
+    document.querySelector("#buildOutfitModal .build-modal-content").innerHTML = `
+      <div class="empty-state" style="padding:40px 20px">
+        <p>Add items to your closet first, then come back to build this outfit.</p>
+      </div>`;
+    return;
+  }
+
+  try {
+    const res = await fetch(`${BACKEND}/match-inspo`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({
+        inspo:       { vibe: inspo.vibe, pieces: inspo.pieces, colors: inspo.colors },
+        inspo_image: inspo.image,   // send the actual photo so Claude can visually compare
+        closet:      closetItems.map((item, i) => ({ index: i, type: item.type, color: item.color, pattern: item.pattern || "" })),
+      }),
+    });
+    if (!res.ok) throw new Error(`Match failed (${res.status})`);
+    const data = await res.json();
+    _buildMatches = data.matches || [];
+    await _renderBuildResults(modal);
+  } catch (err) {
+    const content = document.querySelector("#buildOutfitModal .build-modal-content");
+    if (content) content.innerHTML = `<div class="ai-error"><span class="ai-error-icon">⚠️</span><div>${escHtml(err.message)}</div></div>`;
+  }
+}
+
+async function _renderBuildResults(modal) {
+  const content = modal.querySelector(".build-modal-content");
+  const matches = _buildMatches;
+
+  const storeBtns = INSPO_STORES.map((s, i) =>
+    `<button class="chip${i === 0 ? " active" : ""}" onclick="switchBuildStore('${escHtml(s)}',this)">${escHtml(s || "All")}</button>`
+  ).join("");
+
+  const matchesHtml = matches.map((m, mIdx) => {
+    if (m.closet_item !== null && m.closet_item !== undefined) {
+      const item = closetItems[m.closet_item.index];
+      if (!item) return "";
+      return `
+        <div class="build-match-row">
+          <div class="build-piece-label">${escHtml(m.piece)}</div>
+          <div class="build-closet-match">
+            <img src="${item.image}" class="build-closet-thumb" alt="${escHtml(item.type)}" />
+            <div>
+              <div class="build-match-badge">✓ You have this</div>
+              <div class="build-match-type">${escHtml(item.type)} · ${escHtml(item.color)}</div>
+            </div>
+          </div>
+        </div>`;
+    } else {
+      return `
+        <div class="build-match-row" data-gap-idx="${mIdx}">
+          <div class="build-piece-label">${escHtml(m.piece)}</div>
+          <div class="build-gap-results" id="gap-${mIdx}">
+            <div class="ai-thinking" style="display:flex"><div class="ai-spinner"></div><span>Searching…</span></div>
+          </div>
+        </div>`;
+    }
+  }).join("");
+
+  content.innerHTML = `
+    <div class="build-section-title">Outfit Pieces</div>
+    <div class="build-store-filter">
+      <span class="build-store-label">Shop at:</span>
+      <div class="filter-chips">${storeBtns}</div>
+    </div>
+    <div class="build-matches">${matchesHtml}</div>`;
+
+  // Fire all gap searches in parallel
+  const gaps = matches.map((m, i) => ({...m, idx: i})).filter(m => !m.closet_item && m.closet_item !== 0);
+  await Promise.all(gaps.map(m => _fetchGapProduct(m.idx, m.gap_query || m.piece, "")));
+}
+
+async function switchBuildStore(store, btn) {
+  document.querySelectorAll(".build-store-filter .chip").forEach(c => c.classList.remove("active"));
+  btn.classList.add("active");
+
+  const gaps = _buildMatches.map((m, i) => ({...m, idx: i})).filter(m => !m.closet_item && m.closet_item !== 0);
+  gaps.forEach(m => {
+    const el = document.getElementById(`gap-${m.idx}`);
+    if (el) el.innerHTML = `<div class="ai-thinking" style="display:flex"><div class="ai-spinner"></div><span>Searching…</span></div>`;
+  });
+  await Promise.all(gaps.map(m => _fetchGapProduct(m.idx, m.gap_query || m.piece, store)));
+}
+
+// Strip vibe/style/aesthetic words — query must be [shade] [silhouette] [type] only.
+function _cleanGapQuery(raw) {
+  const vibeWords = /\b(clean|minimalist|effortless|aesthetic|chic|casual|elevated|luxe|classic|modern|simple|soft|quiet|cozy|boho|grunge|edgy|street|cool|girl|style|inspired|look|vibe|outfit|core|cottagecore|fitted|relaxed|oversized|streetwear|feminine|romantic|preppy|sporty|trendy)\b/gi;
+  return raw.replace(vibeWords, "").replace(/\s{2,}/g, " ").trim();
+}
+
+// Retry fallback: drop to last 2-3 words (silhouette + garment type).
+function _simplerQuery(q) {
+  const words = q.trim().split(/\s+/);
+  return words.length > 2 ? words.slice(-2).join(" ") : q;
+}
+
+function _manualSearchBox(gapIdx, placeholderQ) {
+  return `
+    <div class="manual-search-box">
+      <span class="inspo-url-status">No results found.</span>
+      <div class="manual-search-row">
+        <input type="text" class="manual-search-input" id="manual-q-${gapIdx}"
+               placeholder="${escHtml(placeholderQ)}" value="${escHtml(placeholderQ)}" />
+        <button class="manual-search-btn" onclick="manualGapSearch(${gapIdx})">Search</button>
+      </div>
+    </div>`;
+}
+
+// ─── SerpAPI cache ───────────────────────────────────────────────────────────
+const _SERP_TTL  = 24 * 60 * 60 * 1000;  // 24 h in ms
+const _SERP_DEV  = location.hostname === "127.0.0.1" || location.hostname === "localhost";
+
+async function _serpFetch(q) {
+  const key     = "serp_cache_" + q;
+  const cached  = (() => { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } })();
+
+  if (cached && (Date.now() - cached.cachedAt) < _SERP_TTL) {
+    return { shopping_results: cached.results, fromCache: true };
+  }
+
+  const res = await fetch(`${BACKEND}/shop?q=${encodeURIComponent(q)}`);
+  if (!res.ok) throw new Error("Search error");
+  const data = await res.json();
+
+  try {
+    localStorage.setItem(key, JSON.stringify({ results: data.shopping_results || [], cachedAt: Date.now() }));
+  } catch { /* storage full — ignore */ }
+
+  return { shopping_results: data.shopping_results || [], fromCache: false };
+}
+
+async function manualGapSearch(gapIdx) {
+  const input = document.getElementById(`manual-q-${gapIdx}`);
+  if (!input) return;
+  const q = input.value.trim();
+  if (!q) return;
+  const target = document.getElementById(`gap-${gapIdx}`);
+  if (target) target.innerHTML = `<span class="inspo-url-status">Searching…</span>`;
+  await _fetchGapProduct(gapIdx, q, "", true);
+}
+
+async function _fetchGapProduct(gapIdx, query, store, skipClean = false) {
+  const cleaned = skipClean ? query : _cleanGapQuery(query);
+  const q       = store ? `${cleaned} ${store}` : cleaned;
+  const target  = document.getElementById(`gap-${gapIdx}`);
+
+  async function _doSearch(searchQ) {
+    const data = await _serpFetch(searchQ);
+    if (_SERP_DEV && data.fromCache) console.debug(`[serp cache hit] ${searchQ}`);
+    return (data.shopping_results || []).slice(0, 3);
+  }
+
+  try {
+    let products = await _doSearch(q);
+
+    // Retry 1: simpler query (last 2 words)
+    if (!products.length && cleaned !== _simplerQuery(cleaned)) {
+      const simpler = store ? `${_simplerQuery(cleaned)} ${store}` : _simplerQuery(cleaned);
+      products = await _doSearch(simpler);
+    }
+
+    if (!target) return;
+    if (!products.length) {
+      target.innerHTML = _manualSearchBox(gapIdx, cleaned);
+      return;
+    }
+
+    target.innerHTML = products.map(p => `
+      <div class="shop-card">
+        ${p.thumbnail
+          ? `<img src="${escHtml(p.thumbnail)}" class="shop-thumb" alt="" loading="lazy" />`
+          : `<div class="shop-thumb-placeholder">🛍️</div>`}
+        <div class="shop-info">
+          <div class="shop-title">${escHtml((p.title || "").substring(0, 70))}</div>
+          <div class="shop-meta">
+            ${p.price  ? `<span class="shop-price">${escHtml(p.price)}</span>` : ""}
+            ${p.source ? `<span class="shop-store-badge">${escHtml(p.source)}</span>` : ""}
+          </div>
+          ${p.link ? `<a href="${escHtml(p.link)}" target="_blank" rel="noopener noreferrer" class="shop-now-btn">Shop Now →</a>` : ""}
+        </div>
+      </div>`).join("");
+  } catch {
+    if (target) target.innerHTML = `<span class="inspo-url-status error">Search unavailable</span>`;
+  }
+}
+
+// ─── Shop Outfits ────────────────────────────────────────────────────────────
+let _shopOutfits  = [];   // outfit concepts from Claude
+let _shopProducts = {};   // key: "outfitIdx-pieceIdx" → product object
+let _shopFilters  = { occasion: "", vibe: "", store: "" };
+
+function initShopOutfits() {
+  [["sofOccasion", "occasion"], ["sofVibe", "vibe"], ["sofStore", "store"]].forEach(([id, key]) => {
+    document.getElementById(id)?.addEventListener("click", e => {
+      const chip = e.target.closest(".sof-chip");
+      if (!chip) return;
+      e.currentTarget.querySelectorAll(".sof-chip").forEach(c => c.classList.remove("active"));
+      chip.classList.add("active");
+      _shopFilters[key] = chip.dataset.val;
+    });
+  });
+}
+
+function _shopSkeletonHtml() {
+  return `
+    <div class="shop-outfit-card soc-skeleton">
+      <div class="soc-skel-header"></div>
+      <div class="soc-skel-pieces">
+        <div class="soc-skel-piece"></div><div class="soc-skel-piece"></div>
+        <div class="soc-skel-piece"></div><div class="soc-skel-piece"></div>
+      </div>
+      <div class="soc-skel-btn-row"><div class="soc-skel-btn"></div><div class="soc-skel-btn"></div></div>
+    </div>`;
+}
+
+function _pieceProductHtml(role, product, fromCache = false) {
+  if (!product) return `
+    <div class="soc-role-label">${escHtml(role)}</div>
+    <div class="soc-no-result">No results<br>
+      <span class="soc-retry-note">Try another store</span></div>`;
+  const cacheTag = (_SERP_DEV && fromCache) ? `<span class="serp-cache-badge">cached</span>` : "";
+  return `
+    <div class="soc-role-label">${escHtml(role)}${cacheTag}</div>
+    ${product.thumbnail
+      ? `<img src="${escHtml(product.thumbnail)}" class="soc-piece-img" alt="" loading="lazy" />`
+      : `<div class="soc-piece-img-ph">🛍️</div>`}
+    <div class="soc-piece-title">${escHtml((product.title || "").substring(0, 55))}</div>
+    <div class="soc-piece-meta">
+      ${product.price  ? `<span class="shop-price">${escHtml(product.price)}</span>` : ""}
+      ${product.source ? `<span class="shop-store-badge">${escHtml(product.source)}</span>` : ""}
+    </div>
+    ${product.link ? `<a href="${escHtml(product.link)}" target="_blank" rel="noopener noreferrer" class="soc-shop-btn">Shop →</a>` : ""}`;
+}
+
+function _shopOutfitCardHtml(outfit, idx) {
+  const piecesHtml = (outfit.pieces || []).map((p, pi) => `
+    <div class="soc-piece" id="soc-${idx}-p-${pi}">
+      <div class="soc-role-label">${escHtml(p.role)}</div>
+      <div class="soc-piece-loading"><span class="spinner" style="width:20px;height:20px"></span></div>
+    </div>`).join("");
+
+  return `
+    <div class="shop-outfit-card" id="soc-${idx}">
+      <div class="soc-header">
+        <div class="soc-name">${escHtml(outfit.name)}</div>
+        <span class="soc-vibe-badge">${escHtml(outfit.vibe)}</span>
+      </div>
+      <div class="soc-pieces">${piecesHtml}</div>
+      <div class="soc-actions">
+        <div class="soc-closet-summary" id="soc-summary-${idx}" style="display:none"></div>
+        <div class="soc-btn-row">
+          <button class="btn-secondary soc-btn" onclick="saveShopOutfitToInspo(${idx})">💾 Save to Inspo</button>
+          <button class="btn-secondary soc-btn" onclick="findShopOutfitInCloset(${idx})">🔍 Find in My Closet</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function generateShopOutfits() {
+  const grid = document.getElementById("shopOutfitsGrid");
+  grid.innerHTML = Array.from({length: 4}, _shopSkeletonHtml).join("");
+
+  try {
+    const res = await fetch(`${BACKEND}/generate-outfits`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({
+        ..._shopFilters,
+        closet:       closetItems.map(i => ({ type: i.type, color: i.color, pattern: i.pattern || "" })),
+        inspo_vibes:  [...new Set(inspoItems.map(i => i.vibe).filter(Boolean))].slice(0, 8),
+        inspo_colors: [...new Set(inspoItems.flatMap(i => i.colors || []).filter(Boolean))].slice(0, 10),
+      }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    _shopOutfits  = data.outfits || [];
+    _shopProducts = {};
+
+    if (!_shopOutfits.length) {
+      grid.innerHTML = `<div class="sof-empty" style="grid-column:1/-1"><span class="sof-empty-icon">😕</span><p>Couldn't generate outfits — try again.</p><button class="btn-primary" onclick="generateShopOutfits()">Retry</button></div>`;
+      return;
+    }
+
+    grid.innerHTML = _shopOutfits.map((o, i) => _shopOutfitCardHtml(o, i)).join("");
+
+    // Load all outfit products in parallel (outfits × pieces all fire at once)
+    await Promise.all(_shopOutfits.map((outfit, idx) => _loadShopOutfitProducts(outfit, idx)));
+
+  } catch (err) {
+    grid.innerHTML = `<div class="sof-empty" style="grid-column:1/-1"><span class="sof-empty-icon">⚠️</span><p>${escHtml(err.message || "Something went wrong")}</p><button class="btn-primary" onclick="generateShopOutfits()">Retry</button></div>`;
+  }
+}
+
+async function _loadShopOutfitProducts(outfit, idx) {
+  const store = _shopFilters.store;
+  await Promise.all((outfit.pieces || []).map(async (piece, pi) => {
+    const cellEl = document.getElementById(`soc-${idx}-p-${pi}`);
+    if (!cellEl) return;
+
+    const q = store ? `${piece.search_query} ${store}` : piece.search_query;
+    let product = null;
+    let fromCache = false;
+    try {
+      const d = await _serpFetch(q);
+      fromCache = d.fromCache;
+      product = (d.shopping_results || [])[0] || null;
+
+      // Retry with simpler query if nothing found
+      if (!product) {
+        const words = piece.search_query.trim().split(/\s+/);
+        if (words.length > 2) {
+          const simpler = store
+            ? `${words.slice(-2).join(" ")} ${store}`
+            : words.slice(-2).join(" ");
+          const d2 = await _serpFetch(simpler);
+          fromCache = d2.fromCache;
+          product = (d2.shopping_results || [])[0] || null;
+        }
+      }
+    } catch { /* leave product null */ }
+
+    _shopProducts[`${idx}-${pi}`] = product;
+    if (cellEl) cellEl.innerHTML = _pieceProductHtml(piece.role, product, fromCache);
+  }));
+}
+
+async function retryShopPiece(idx, pi) {
+  const outfit = _shopOutfits[idx];
+  const piece  = outfit?.pieces?.[pi];
+  const cellEl = document.getElementById(`soc-${idx}-p-${pi}`);
+  if (!piece || !cellEl) return;
+
+  cellEl.innerHTML = `<div class="soc-role-label">${escHtml(piece.role)}</div><div class="soc-piece-loading"><span class="spinner" style="width:20px;height:20px"></span></div>`;
+
+  const altStores = ["Shein", "Zara", "H&M", "Aritzia", "Garage"].filter(s => s !== _shopFilters.store);
+  const nextStore = altStores[Math.floor(Math.random() * altStores.length)];
+  const q = `${piece.search_query} ${nextStore}`;
+
+  let product = null;
+  let fromCache = false;
+  try {
+    const d = await _serpFetch(q);
+    fromCache = d.fromCache;
+    product = (d.shopping_results || [])[0] || null;
+  } catch { /* leave null */ }
+
+  _shopProducts[`${idx}-${pi}`] = product;
+  cellEl.innerHTML = _pieceProductHtml(piece.role, product, fromCache);
+}
+
+function saveShopOutfitToInspo(idx) {
+  const outfit = _shopOutfits[idx];
+  if (!outfit) return;
+  inspoItems.unshift({
+    id:          Date.now(),
+    image:       null,
+    source:      "shop-outfits",
+    vibe:        outfit.vibe,
+    pieces:      (outfit.pieces || []).map(p => p.search_query),
+    colors:      [],
+    colors_hex:  [],
+    style_notes: outfit.name,
+  });
+  saveInspo();
+  showToast(`"${outfit.name}" saved to Inspo Board`);
+}
+
+function findShopOutfitInCloset(idx) {
+  const outfit = _shopOutfits[idx];
+  if (!outfit) return;
+  if (!closetItems.length) { showToast("Add items to your closet first"); return; }
+
+  // Remove any previous "owned" state on this card
+  document.querySelectorAll(`#soc-${idx} .soc-owned`).forEach(el => {
+    el.classList.remove("soc-owned");
+    el.querySelector(".soc-owned-badge")?.remove();
+  });
+
+  let ownedCount = 0;
+  let shopTotal  = 0;
+
+  (outfit.pieces || []).forEach((piece, pi) => {
+    const cellEl = document.getElementById(`soc-${idx}-p-${pi}`);
+    if (!cellEl) return;
+
+    const q = piece.search_query.toLowerCase();
+    const match = closetItems.find(item => {
+      const type  = (item.type  || "").toLowerCase().replace(/-/g, " ");
+      const color = (item.color || "").toLowerCase();
+      const typeWords  = type.split(/\s+/).filter(w => w.length > 2);
+      const colorWords = color.split(/\s+/).filter(w => w.length > 2);
+      const typeMatch  = typeWords.length > 0 && typeWords.every(w => q.includes(w));
+      const colorMatch = colorWords.some(w => q.includes(w));
+      return typeMatch && colorMatch;
+    });
+
+    if (match) {
+      ownedCount++;
+      cellEl.classList.add("soc-owned");
+      const badge = document.createElement("div");
+      badge.className = "soc-owned-badge";
+      badge.textContent = "✓ You own this";
+      cellEl.prepend(badge);
+    } else {
+      const product = _shopProducts[`${idx}-${pi}`];
+      if (product?.price) {
+        const n = parseFloat(product.price.replace(/[^0-9.]/g, ""));
+        if (!isNaN(n)) shopTotal += n;
+      }
+    }
+  });
+
+  const total     = (outfit.pieces || []).length;
+  const summary   = document.getElementById(`soc-summary-${idx}`);
+  if (summary) {
+    summary.style.display = "block";
+    const priceStr = shopTotal > 0 ? ` — shop the rest for ~$${shopTotal.toFixed(0)}` : "";
+    summary.textContent = `You own ${ownedCount} of ${total} pieces${priceStr}`;
+  }
+}
+
+// Patch showTab to handle match tab + weather + inspo
 const _origShowTab = showTab;
 showTab = function (name) {
   _origShowTab(name);
   if (name === "outfits") fetchWeather();
+  if (name === "inspo")   renderInspoBoard();
 };
