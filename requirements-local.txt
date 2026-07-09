@@ -1,6 +1,8 @@
-# Production / Render — no torch or transformers (Claude vision handles detection)
+# Local development — includes YOLOS model (torch + transformers)
 fastapi==0.115.0
 uvicorn==0.30.1
+torch>=2.0.0
+transformers>=4.40.0
 pillow>=10.0.0
 webcolors==24.6.0
 anthropic>=0.40.0

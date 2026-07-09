@@ -20,14 +20,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
-import torch
 import webcolors
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
-from transformers import YolosForObjectDetection, YolosImageProcessor
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
@@ -78,10 +76,19 @@ if _FRONTEND.exists():
     app.mount("/app", StaticFiles(directory=str(_FRONTEND), html=True), name="frontend")
 
 
-# ── YOLOS (local fallback, loaded lazily) ─────────────────────
+# ── YOLOS (local fallback, optional — not required for Render) ─
 _yolos_model     = None
 _yolos_processor = None
 YOLOS_MODEL_NAME = "valentinafeve/yolos-fashionpedia"
+
+try:
+    import torch
+    from transformers import YolosForObjectDetection, YolosImageProcessor
+    YOLOS_AVAILABLE = True
+    print("[boot] YOLOS libraries available.")
+except Exception as e:
+    YOLOS_AVAILABLE = False
+    print(f"[boot] YOLOS not available: {e}. Will use Claude vision only.")
 
 def _get_yolos():
     global _yolos_model, _yolos_processor
@@ -647,13 +654,14 @@ async def detect_clothing(image_bytes: bytes) -> dict:
         except Exception as e:
             print(f"[gpt-vision] failed ({e}), trying YOLOS")
 
-    # 3. YOLOS local model
-    try:
-        pil = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        r   = _yolos_detect(pil)
-        return _normalise(r, "yolos")
-    except Exception as e:
-        print(f"[yolos] failed ({e}), using heuristic")
+    # 3. YOLOS local model (only when torch/transformers are installed)
+    if YOLOS_AVAILABLE:
+        try:
+            pil = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+            r   = _yolos_detect(pil)
+            return _normalise(r, "yolos")
+        except Exception as e:
+            print(f"[yolos] failed ({e}), using heuristic")
 
     # 4. Heuristic last resort
     try:
@@ -679,6 +687,7 @@ def health():
         "status":             "ok",
         "anthropic_vision":   ANTHROPIC_AVAILABLE,
         "openai_vision":      OPENAI_AVAILABLE,
+        "yolos_available":    YOLOS_AVAILABLE,
         "yolos_loaded":       _yolos_model is not None,
     }
 
