@@ -16,6 +16,7 @@ import io
 import json
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -1309,17 +1310,32 @@ async def generate_outfits(req: GenerateOutfitsRequest) -> Dict[str, Any]:
     raise HTTPException(503, "No AI key set")
 
 
+_shop_cache: dict = {}           # query → (cached_at, data)
+_SHOP_CACHE_TTL = 7 * 24 * 3600  # 7 days — matches client-side TTL
+
 @app.get("/shop", tags=["utility"])
 async def shop_proxy(q: str, key: str = ""):
     """Proxy SerpAPI Google Shopping to avoid browser CORS restrictions."""
     serp_key = key or os.environ.get("SERP_KEY", "")
     if not serp_key:
         return {"shopping_results": [], "error": "No SERP key"}
+
+    # Server-side cache — survives page reloads within the same Render session
+    now = time.time()
+    if q in _shop_cache:
+        cached_at, cached_data = _shop_cache[q]
+        if now - cached_at < _SHOP_CACHE_TTL:
+            return cached_data
+
     try:
         import httpx as _httpx
         search_url = f"https://serpapi.com/search.json?engine=google_shopping&q={q}&api_key={serp_key}&num=5"
         async with _httpx.AsyncClient(timeout=10) as client:
             r = await client.get(search_url)
-            return r.json()
+            data = r.json()
+        _shop_cache[q] = (now, data)
+        if len(_shop_cache) > 400:   # evict all if cache grows very large (edge case)
+            _shop_cache.clear()
+        return data
     except Exception as e:
         return {"shopping_results": [], "error": str(e)}

@@ -1925,8 +1925,13 @@ function _manualSearchBox(gapIdx, placeholderQ) {
 }
 
 // ─── SerpAPI cache ───────────────────────────────────────────────────────────
-const _SERP_TTL  = 24 * 60 * 60 * 1000;  // 24 h in ms
+const _SERP_TTL  = 7 * 24 * 60 * 60 * 1000;  // 7 days (was 24h)
 const _SERP_DEV  = location.hostname === "127.0.0.1" || location.hostname === "localhost";
+
+// Daily live-call counter — lets you see how many non-cached calls happened today
+function _serpDailyKey()   { return "serp_day_" + new Date().toDateString(); }
+function _serpDailyCount() { try { return parseInt(localStorage.getItem(_serpDailyKey()) || "0", 10); } catch { return 0; } }
+function _serpDailyBump()  { const k = _serpDailyKey(), n = _serpDailyCount() + 1; try { localStorage.setItem(k, n); } catch {} return n; }
 
 async function _serpFetch(q) {
   const key     = "serp_cache_" + q;
@@ -1935,6 +1940,9 @@ async function _serpFetch(q) {
   if (cached && (Date.now() - cached.cachedAt) < _SERP_TTL) {
     return { shopping_results: cached.results, fromCache: true };
   }
+
+  const callNum = _serpDailyBump();
+  if (_SERP_DEV) console.debug(`[serp live #${callNum} today] "${q}"`);
 
   const res = await fetch(`${BACKEND}/shop?q=${encodeURIComponent(q)}`);
   if (!res.ok) throw new Error("Search error");
@@ -2109,37 +2117,55 @@ async function generateShopOutfits() {
   }
 }
 
+// Roles that auto-load — everything else shows a "Find" button to save API calls
+const _SERP_EAGER = new Set(["top","bottom","dress","jumpsuit","jacket","outerwear","coat","blazer"]);
+
 async function _loadShopOutfitProducts(outfit, idx) {
   const store = _shopFilters.store;
   await Promise.all((outfit.pieces || []).map(async (piece, pi) => {
     const cellEl = document.getElementById(`soc-${idx}-p-${pi}`);
     if (!cellEl) return;
-
-    const q = store ? `${piece.search_query} ${store}` : piece.search_query;
-    let product = null;
-    let fromCache = false;
-    try {
-      const d = await _serpFetch(q);
-      fromCache = d.fromCache;
-      product = (d.shopping_results || [])[0] || null;
-
-      // Retry with simpler query if nothing found
-      if (!product) {
-        const words = piece.search_query.trim().split(/\s+/);
-        if (words.length > 2) {
-          const simpler = store
-            ? `${words.slice(-2).join(" ")} ${store}`
-            : words.slice(-2).join(" ");
-          const d2 = await _serpFetch(simpler);
-          fromCache = d2.fromCache;
-          product = (d2.shopping_results || [])[0] || null;
-        }
-      }
-    } catch { /* leave product null */ }
-
-    _shopProducts[`${idx}-${pi}`] = product;
-    if (cellEl) cellEl.innerHTML = _pieceProductHtml(piece.role, product, fromCache);
+    const role = (piece.role || "").toLowerCase();
+    if (!_SERP_EAGER.has(role)) {
+      // Lazy — show a Find button instead of auto-fetching
+      cellEl.innerHTML = `<div class="soc-role-label">${escHtml(piece.role)}</div>
+        <button class="soc-lazy-btn" onclick="loadShopPiece(${idx},${pi})">Find →</button>`;
+      return;
+    }
+    await _fetchShopPiece(idx, pi, piece, store);
   }));
+}
+
+// Called when user clicks "Find →" on a deferred piece
+async function loadShopPiece(idx, pi) {
+  const piece  = _shopOutfits[idx]?.pieces?.[pi];
+  const cellEl = document.getElementById(`soc-${idx}-p-${pi}`);
+  if (!piece || !cellEl) return;
+  cellEl.innerHTML = `<div class="soc-role-label">${escHtml(piece.role)}</div>
+    <div class="soc-piece-loading"><span class="spinner" style="width:20px;height:20px"></span></div>`;
+  await _fetchShopPiece(idx, pi, piece, _shopFilters.store);
+}
+
+async function _fetchShopPiece(idx, pi, piece, store) {
+  const cellEl = document.getElementById(`soc-${idx}-p-${pi}`);
+  const q = store ? `${piece.search_query} ${store}` : piece.search_query;
+  let product = null, fromCache = false;
+  try {
+    const d = await _serpFetch(q);
+    fromCache = d.fromCache;
+    product = (d.shopping_results || [])[0] || null;
+    if (!product) {
+      const words = piece.search_query.trim().split(/\s+/);
+      if (words.length > 2) {
+        const simpler = store ? `${words.slice(-2).join(" ")} ${store}` : words.slice(-2).join(" ");
+        const d2 = await _serpFetch(simpler);
+        fromCache = d2.fromCache;
+        product = (d2.shopping_results || [])[0] || null;
+      }
+    }
+  } catch { /* leave product null */ }
+  _shopProducts[`${idx}-${pi}`] = product;
+  if (cellEl) cellEl.innerHTML = _pieceProductHtml(piece.role, product, fromCache);
 }
 
 async function retryShopPiece(idx, pi) {

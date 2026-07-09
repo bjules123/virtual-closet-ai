@@ -1391,6 +1391,13 @@ body {
   border-radius: 6px; padding: 3px 8px; cursor: pointer;
 }
 .soc-retry-btn:hover { background: var(--purple-50); }
+.soc-lazy-btn {
+  font-size: .65rem; font-weight: 700; color: #C4714F;
+  background: none; border: 1px solid #C4714F;
+  border-radius: 6px; padding: 5px 10px; cursor: pointer;
+  margin-top: auto; transition: background .15s;
+}
+.soc-lazy-btn:hover { background: rgba(196,113,79,.08); }
 
 /* Card actions */
 .soc-actions { display: flex; flex-direction: column; gap: 8px; }
